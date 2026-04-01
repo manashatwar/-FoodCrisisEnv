@@ -1,20 +1,36 @@
 name: irce
 version: "0.1.0"
-description: "OpenEnv benchmark for budget-aware recovery decisions under ambiguous failures, cooldowns, and drift."
+description: >
+  IRCE (Intelligent RecoveryControl Environment) is a deterministic OpenEnv
+  benchmark for budget-aware recovery decisions under ambiguous tool failures,
+  rate-limit cooldowns, and reliability drift. Agents learn when to retry,
+  modify, switch tools, replan, or escalate.
+
 app: server.app:app
 runtime: fastapi
 port: 8000
+inference: inference.py
+
 tasks:
   - id: 1
     name: easy
-    description: "Clean recovery with transient and hard failures."
+    max_steps: 6
+    description: >
+      Clean recovery with transient and hard failures only.
+      Generous budget (1.0), no noise, no rate limits.
   - id: 2
     name: medium
-    description: "Mixed failures with rate limits, ambiguous outcomes, and budget pressure."
+    max_steps: 6
+    description: >
+      Mixed failures with rate limits, ambiguous outcomes, and budget pressure.
+      Budget 0.8, 12% observation noise, cooldown mechanics active.
   - id: 3
     name: hard
-    description: "Drifting reliability, noisy signals, cooldowns, and costly backup routing."
-max_steps: 7
+    max_steps: 7
+    description: >
+      Drifting reliability, noisy error labels, cascading penalties, and
+      costly backup routing. Budget 0.6, 25% noise, drift enabled after step 2.
+
 metadata:
   display_name: "Intelligent RecoveryControl Environment"
   package_name: "irce"
@@ -22,3 +38,5 @@ metadata:
   benchmark_focus: "failure-recovery under uncertainty"
   deterministic: true
   llm_ready: true
+  author: "IRCE Team"
+  license: "MIT"

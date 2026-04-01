@@ -1,3 +1,24 @@
+"""
+rewards.py
+----------
+Per-step reward function for IRCE.
+
+compute_step_reward() is called by the environment after each action.
+It returns a RewardBreakdown namedtuple with every component broken out,
+making reward shaping transparent and auditable.
+
+Reward signal components
+------------------------
+step_cost           : −0.10  always (cost of one step)
+progress_bonus      : +0.30  if progress_delta ≥ 45% (significant advance)
+ambiguity_bonus     : +0.15  if result=AMBIGUOUS but progress still moved
+completion_bonus    : +1.00  on task completion
+repeated_error_pen  : −0.20  per re-occurrence of the same error type
+bad_retry_penalty   : −0.30  if RETRY is used on a HARD or RATE_LIMIT error
+switch_cost_penalty : −0.05  on tool switch (−small for backup budget drain)
+escalation_penalty  : −0.15  for premature escalation (low progress)
+cascade_penalty     : −k×n   task-3 extra penalty for repeated failures
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

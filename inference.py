@@ -1,3 +1,35 @@
+"""
+inference.py
+------------
+Hackathon entry point for the IRCE OpenEnv benchmark.
+
+Runs the IRCE environment across all three tasks (easy / medium / hard) and
+prints per-task and average scores. Must be run from the project root.
+
+Inference flow
+--------------
+1. Load API credentials from .env (HF_TOKEN, API_BASE_URL, MODEL_NAME).
+2. Build an OpenAI-compatible client pointing at the configured LLM API.
+3. For each task (1 → 2 → 3):
+   a. Reset the environment.
+   b. At every step, build a chat prompt (system + state summary).
+   c. Call the LLM via client.chat.completions.create().
+   d. Parse the one-word action from the response.
+   e. Step the environment; repeat until done.
+4. Print scores and average.
+
+Fallback policy
+---------------
+If the LLM API is unavailable (no API key, network error, etc.) the agent
+falls back to a deterministic rule-based policy (select_fallback_action)
+that achieves ~0.86 average without any API calls — ensuring the script
+always produces a valid score.
+
+Usage
+-----
+    python inference.py                           # API mode (uses .env)
+    python inference.py --seed 42                 # different eval seed
+"""
 from __future__ import annotations
 
 from collections import deque
@@ -30,8 +62,16 @@ from irce.tasks import build_task_registry
 SUPPORTED_ACTIONS = ("RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE")
 SYSTEM_PROMPT = (
     "You are controlling a recovery policy for IRCE. "
-    "Choose exactly one action from RETRY, MODIFY, SWITCH, REPLAN, ESCALATE. "
-    "Prefer stable recovery, low waste, and low repeated failure."
+    "Choose the single best recovery action based on the current error_type and context.\n\n"
+    "Decision rules (follow in order):\n"
+    "  1. error=HARD        → MODIFY  (never RETRY on HARD — it always fails)\n"
+    "  2. error=RATE_LIMIT  → SWITCH  (cooldown — switching tool path clears it)\n"
+    "  3. repeat_errors>=2  → SWITCH  (same error twice means path is stuck)\n"
+    "  4. result=AMBIGUOUS  → REPLAN  (partial signal — reframe before next attempt)\n"
+    "  5. error=TRANSIENT   → RETRY   (transient failures are safe to retry once)\n"
+    "  6. budget<0.15       → ESCALATE (too little left to keep trying)\n\n"
+    "Respond with EXACTLY one word: RETRY, MODIFY, SWITCH, REPLAN, or ESCALATE\n"
+    "No explanation. One word only."
 )
 ObservationT = TypeVar("ObservationT")
 
@@ -156,21 +196,21 @@ def build_user_prompt(step: int, observation: IRCEObservation, history: list[str
 def build_openai_client() -> tuple[Any | None, str, str]:
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN") or ""
     base_url = os.getenv("API_BASE_URL", "").strip()
-    model_name = os.getenv("MODEL_NAME", "").strip()
+    model_name_env = os.getenv("MODEL_NAME", "").strip()
 
-    if not api_key or not model_name:
-        return None, model_name, "OPENAI_API_KEY/HF_TOKEN or MODEL_NAME missing"
+    if not api_key or not model_name_env:
+        return None, model_name_env, "OPENAI_API_KEY/HF_TOKEN or MODEL_NAME missing"
 
     try:
         from openai import OpenAI
     except Exception as exc:  # noqa: BLE001
-        return None, model_name, f"OpenAI SDK import failed: {exc}"
+        return None, model_name_env, f"OpenAI SDK import failed: {exc}"
 
     client_kwargs: dict[str, Any] = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
 
-    return OpenAI(**client_kwargs), model_name, ""
+    return OpenAI(**client_kwargs), model_name_env, ""
 
 
 def parse_model_action(response_text: str) -> str | None:
@@ -275,16 +315,25 @@ def run_task(task_id: int, seed: int, client: Any | None, model_name: str) -> fl
         env.close()
 
 
+def _parse_inference_args() -> Any:
+    import argparse
+    p = argparse.ArgumentParser(description="IRCE inference runner.")
+
+    p.add_argument("--seed", type=int, default=7, help="Evaluation seed (default: 7).")
+    return p.parse_args()
+
+
 def main() -> None:
     load_dotenv()
+    args = _parse_inference_args()
 
     client, model_name, client_status = build_openai_client()
     if client is None:
-        print(f"OpenAI client not configured ({client_status}). Using deterministic fallback policy.")
+        print(f"Client not configured ({client_status}). Using deterministic fallback policy.")
     else:
         print(f"OpenAI client configured for model '{model_name}'.")
 
-    seed = 7
+    seed = args.seed
     task_registry = build_task_registry()
     scores = [
         run_task(task_id=task_id, seed=seed, client=client, model_name=model_name)

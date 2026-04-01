@@ -1,3 +1,25 @@
+"""
+tasks.py
+--------
+Three deterministic task configurations for the IRCE benchmark.
+
+Difficulty progression
+----------------------
+Task 1 — easy
+    Clean signals, generous budget, no rate limits, no drift.
+    Tests basic repair decisions without overreacting.
+
+Task 2 — medium
+    Adds RATE_LIMIT errors, cooldown mechanics, and moderate ambiguity.
+    Tests routing around degraded tool paths.
+
+Task 3 — hard
+    Lower budget, noisy error labels, failure-mode drift after step 2,
+    cascading repeat penalties, and costly backup routing.
+    Tests stability under uncertainty while finishing efficiently.
+
+All tasks are seeded (deterministic) and produce scores in [0.0, 1.0].
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,30 +27,39 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class TaskConfig:
+    """
+    Immutable configuration for one IRCE task.
+
+    Probability fields (retry_success, modify_success, etc.) control the
+    chance that a given action succeeds under its ideal error condition.
+    The backup_success_bonus is added when the agent is on the backup tool path.
+    """
+
     task_id: int
     name: str
     description: str
     goal: str
-    initial_budget: float
-    max_steps: int
-    noise_level: float
-    ambiguity_rate: float
-    allow_rate_limit: bool
-    rate_limit_cooldown: int
-    drift_after_step: int | None
-    drift_enabled: bool
-    cascade_penalty: float
-    initial_errors: tuple[str, ...]
-    retry_success: float
-    modify_success: float
-    switch_success: float
-    replan_success: float
-    backup_success_bonus: float
-    backup_budget_cost: float
-    ambiguity_progress: float
+    initial_budget: float       # Starting budget in [0.0, 1.0]
+    max_steps: int              # Hard episode step limit
+    noise_level: float          # Probability that observed error_type is wrong
+    ambiguity_rate: float       # Base chance an action returns AMBIGUOUS
+    allow_rate_limit: bool      # Whether RATE_LIMIT errors can occur
+    rate_limit_cooldown: int    # Steps of cooldown imposed by RATE_LIMIT
+    drift_after_step: int | None  # Step after which failure modes can escalate
+    drift_enabled: bool         # Master flag for drift mechanics
+    cascade_penalty: float      # Extra penalty per repeated failure (hard task)
+    initial_errors: tuple[str, ...]  # Error types the episode can start with
+    retry_success: float        # P(success | RETRY, TRANSIENT, primary)
+    modify_success: float       # P(success | MODIFY, HARD)
+    switch_success: float       # P(success | SWITCH, RATE_LIMIT)
+    replan_success: float       # P(success | REPLAN, HARD)
+    backup_success_bonus: float # Added to success probability on backup path
+    backup_budget_cost: float   # Extra budget consumed per step on backup
+    ambiguity_progress: float   # Progress fraction awarded on AMBIGUOUS result
 
 
 def build_task_registry() -> dict[int, TaskConfig]:
+    """Return a fresh mapping of task_id → TaskConfig for all three tasks."""
     return {
         1: TaskConfig(
             task_id=1,
@@ -106,6 +137,11 @@ TASKS = build_task_registry()
 
 
 def get_task_config(task_id: int = 1) -> TaskConfig:
+    """
+    Return the TaskConfig for the given task_id (1, 2, or 3).
+
+    Raises ValueError for unknown task IDs.
+    """
     try:
         return TASKS[int(task_id)]
     except (KeyError, TypeError, ValueError) as exc:

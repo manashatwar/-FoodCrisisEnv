@@ -6,9 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Install package and dependencies in one layer.
+# Copying pyproject.toml first leverages Docker layer caching.
+COPY pyproject.toml requirements.txt ./
+RUN pip install --upgrade pip && pip install .
 
+# Copy source last so code changes don't bust the dependency cache.
 COPY . .
 
 EXPOSE 8000

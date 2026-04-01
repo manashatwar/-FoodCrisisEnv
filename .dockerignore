@@ -16,4 +16,8 @@ build/
 .vscode/
 .coverage
 .coverage.*
-=0.2.0
+grpo_trained_model/
+train.py
+train_grpo.py
+trained_policy*.json
+train_grpo_analysis.md

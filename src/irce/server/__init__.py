@@ -1,4 +1,4 @@
-"""Server package for the IRCE OpenEnv scaffold."""
+"""Server package for the FoodCrisisEnv OpenEnv app."""
 
 from .app import app
 

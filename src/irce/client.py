@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
 
 
 class IRCEEnvClient(EnvClient[IRCEAction, IRCEObservation, IRCEState]):
-    """Basic typed client skeleton for an IRCE OpenEnv server."""
+    """Typed client for FoodCrisisEnv; package naming remains ``irce`` for compatibility."""
 
     def _step_payload(self, action: IRCEAction | dict[str, Any] | str) -> dict[str, Any]:
         if isinstance(action, str):

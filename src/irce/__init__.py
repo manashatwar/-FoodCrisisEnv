@@ -1,4 +1,4 @@
-"""IRCE package with lazy exports to keep CLI/runtime imports lightweight."""
+"""FoodCrisisEnv compatibility package with lazy exports to keep runtime imports lightweight."""
 
 from __future__ import annotations
 

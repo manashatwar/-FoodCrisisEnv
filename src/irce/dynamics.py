@@ -1,13 +1,12 @@
-"""
+﻿"""
 dynamics.py
 -----------
-Reserved module for IRCE transition-table extensions.
+Reserved module for future FoodCrisisEnv dynamics extensions.
 
-Currently empty — transition logic lives in environment.py
-(_attempt_probability, _advance_error_on_failure, _apply_task_drift).
+Currently empty - transition logic lives in environment.py.
 This module exists as an extension point for future work such as:
 
-    - Markov failure-chain tables
-    - Time-varying reliability curves
-    - Multi-agent interference models
+    - richer contamination propagation models
+    - additional shipment-routing policies
+    - multi-agent investigator coordination
 """

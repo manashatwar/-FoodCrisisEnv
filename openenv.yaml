@@ -1,42 +1,49 @@
-name: irce
-version: "0.1.0"
+﻿name: food-crisis-env
+version: "1.0.0"
 description: >
-  IRCE (Intelligent RecoveryControl Environment) is a deterministic OpenEnv
-  benchmark for budget-aware recovery decisions under ambiguous tool failures,
-  rate-limit cooldowns, and reliability drift. Agents learn when to retry,
-  modify, switch tools, replan, or escalate.
+  FoodCrisisEnv is a deterministic OpenEnv benchmark for food safety outbreak
+  response. Agents trace contaminated food through a directed supply chain
+  graph under noisy sensors, delayed illness reports, limited lab tests,
+  limited recall budget, and public-trust tradeoffs.
 
 app: server.app:app
 runtime: fastapi
 port: 8000
 inference: inference.py
+action_type: string
+observation_type: structured
+reward: continuous
+grader: deterministic
+score_range: [0.0, 1.0]
 
 tasks:
   - id: 1
     name: easy
-    max_steps: 6
+    max_steps: 48
     description: >
-      Clean recovery with transient and hard failures only.
-      Generous budget (1.0), no noise, no rate limits.
+      Single-source contamination tracing with low sensor noise, fast illness
+      reports, and generous budgets.
   - id: 2
     name: medium
-    max_steps: 6
+    max_steps: 60
     description: >
-      Mixed failures with rate limits, ambiguous outcomes, and budget pressure.
-      Budget 0.8, 12% observation noise, cooldown mechanics active.
+      Multi-source tracing with delayed reports, noisier sensors, and tighter
+      lab and recall budgets.
   - id: 3
     name: hard
-    max_steps: 7
+    max_steps: 72
     description: >
-      Drifting reliability, noisy error labels, cascading penalties, and
-      costly backup routing. Budget 0.6, 25% noise, drift enabled after step 2.
+      Adversarial outbreak management with false sensor spikes, delayed
+      illness reports, source re-seeding, and strong public-trust pressure.
 
 metadata:
-  display_name: "Intelligent RecoveryControl Environment"
+  display_name: "FoodCrisisEnv"
   package_name: "irce"
   package_dir: "src/irce"
-  benchmark_focus: "failure-recovery under uncertainty"
+  benchmark_focus: "food safety contamination tracing and containment"
+  real_world_domain: "FDA-style supply chain outbreak response"
   deterministic: true
   llm_ready: true
-  author: "IRCE Team"
+  author: "FoodCrisisEnv Team"
   license: "MIT"
+  compatibility_note: "Legacy compatibility action strings are mapped internally for inference compatibility."

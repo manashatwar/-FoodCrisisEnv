@@ -1,19 +1,4 @@
-"""
-models.py
----------
-Pydantic models for the IRCE OpenEnv interface.
-
-Three model types follow the OpenEnv spec:
-
-    IRCEAction      — what the agent sends each step
-    IRCEObservation — what the agent receives each step
-    IRCEState       — hidden full state (server-side only)
-
-All models inherit from the OpenEnv base classes (Action, Observation, State)
-when running inside an OpenEnv server. In standalone mode (IRCE_STANDALONE=1),
-lightweight base classes are used so inference.py and train*.py need no server.
-"""
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from typing import Any
@@ -22,18 +7,14 @@ from pydantic import BaseModel, Field, field_validator
 
 if os.getenv("IRCE_STANDALONE") == "1":
     class Action(BaseModel):
-        """Lightweight Action base for standalone mode."""
+        pass
 
     class Observation(BaseModel):
-        """Lightweight Observation base for standalone mode."""
-
         done: bool = False
         reward: float = 0.0
         metadata: dict[str, Any] = Field(default_factory=dict)
 
     class State(BaseModel):
-        """Lightweight State base for standalone mode."""
-
         episode_id: str = ""
 else:
     try:
@@ -41,146 +22,139 @@ else:
     except ImportError:  # pragma: no cover
         from openenv_core.env_server import Action, Observation, State
 
-# The five recovery actions the agent may choose at each step.
-SUPPORTED_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
+FOOD_ACTIONS = {"INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT"}
+LEGACY_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
+SUPPORTED_ACTIONS = FOOD_ACTIONS | LEGACY_ACTIONS
+
+
+class NodeState(BaseModel):
+    node_id: str
+    node_type: str
+    sensor_reading: float = Field(default=0.0, ge=0.0, le=1.0)
+    quarantined: bool = False
+    batch_ids: list[str] = Field(default_factory=list)
+    connected_to: list[str] = Field(default_factory=list)
+
+
+class BatchRecord(BaseModel):
+    batch_id: str
+    origin_node: str
+    current_node: str
+    path_taken: list[str] = Field(default_factory=list)
+    planned_path: list[str] = Field(default_factory=list)
+    contaminated: bool = False
+    recalled: bool = False
+    delivered: bool = False
+
+
+class IllnessReport(BaseModel):
+    retailer_id: str
+    case_count: int = Field(default=0, ge=0)
+    timestep_reported: int = Field(default=0, ge=0)
+    report_text: str = ""
+
+
+class PendingInspection(BaseModel):
+    node_id: str
+    due_timestep: int = Field(default=0, ge=0)
+    contaminated: bool = False
 
 
 class IRCEAction(Action):
-    """
-    A single recovery action chosen by the agent.
-
-    The agent responds with exactly one of:
-        RETRY    — retry the current tool (best for TRANSIENT errors)
-        MODIFY   — change the request structure (best for HARD errors)
-        SWITCH   — swap to backup/primary tool (best for RATE_LIMIT or loops)
-        REPLAN   — reframe the approach (best for AMBIGUOUS outcomes)
-        ESCALATE — hand off to a human operator (last resort only)
-
-    Common aliases are accepted and normalised automatically
-    (e.g. "SWITCH_TOOL" → "SWITCH", "MODIFY_INPUT" → "MODIFY").
-    """
-
-    action_type: str = Field(
-        default="RETRY",
-        description="One of RETRY, MODIFY, SWITCH, REPLAN, ESCALATE.",
-    )
+    action_type: str = "WAIT"
 
     @field_validator("action_type", mode="before")
     @classmethod
     def normalize_action_type(cls, value: Any) -> str:
-        """Normalise and alias-resolve the action string."""
         if value is None:
-            return "RETRY"
+            return "WAIT"
 
-        normalized = str(value).strip().upper().replace("-", "_").replace(" ", "_")
+        text = " ".join(str(value).strip().split())
+        if not text:
+            return "WAIT"
+
+        parts = text.split(" ", 1)
+        verb = parts[0].upper().replace("-", "_")
+        target = parts[1].strip() if len(parts) > 1 else ""
         alias_map = {
             "MODIFY_INPUT": "MODIFY",
             "SWITCH_TOOL": "SWITCH",
         }
-        return alias_map.get(normalized, normalized)
+        normalized = alias_map.get(verb, verb)
+        return f"{normalized} {target}".strip()
+
+    @property
+    def verb(self) -> str:
+        return self.action_type.split(" ", 1)[0]
+
+    @property
+    def target(self) -> str | None:
+        parts = self.action_type.split(" ", 1)
+        return parts[1].strip() if len(parts) > 1 else None
 
     @property
     def is_supported(self) -> bool:
-        """Return True if action_type is one of the five supported actions."""
-        return self.action_type in SUPPORTED_ACTIONS
+        return self.verb in SUPPORTED_ACTIONS
 
 
 class IRCEObservation(Observation):
-    """
-    The observation returned to the agent after each step.
-
-    All fields are LLM-readable strings or scalars.
-    The most important fields for action selection are error_type,
-    budget_remaining, same_error_count, and cooldown_remaining.
-    """
-
-    goal: str = Field(
-        default="Recover the task efficiently.",
-        description="Natural-language task goal (same throughout an episode).",
-    )
-    tool_result: str = Field(
-        default="ERROR",
-        description="Last tool call outcome: SUCCESS, ERROR, or AMBIGUOUS.",
-    )
-    error_type: str = Field(
-        default="TRANSIENT",
-        description=(
-            "Type of the most recent error: TRANSIENT (retry-safe), "
-            "HARD (requires modification), or RATE_LIMIT (cooldown required). "
-            "May be noisy on Task 2 (12%) and Task 3 (25%)."
-        ),
-    )
-    same_error_count: int = Field(
-        default=0,
-        ge=0,
-        description="Number of consecutive steps with the same error type.",
-    )
-    budget_remaining: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description="Remaining API budget fraction in [0.0, 1.0]. Exhaustion ends the episode.",
-    )
-    step_count: int = Field(
-        default=0,
-        ge=0,
-        description="Number of steps taken so far in this episode.",
-    )
-    last_action_error: bool = Field(
-        default=False,
-        description="True if the previous action was a bad retry (RETRY on HARD/RATE_LIMIT).",
-    )
-    active_tool: str = Field(
-        default="primary",
-        description="Which tool path is active: 'primary' or 'backup'.",
-    )
-    cooldown_remaining: int = Field(
-        default=0,
-        ge=0,
-        description="Steps remaining before a rate-limited tool path is available again.",
-    )
-    progress_hint: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Estimated task completion fraction in [0.0, 1.0].",
-    )
-    history_tail: list[str] = Field(
-        default_factory=list,
-        description="Short log of the last 3 (action → result) lines.",
-    )
-    status_summary: str = Field(
-        default="",
-        description="Compact LLM-readable summary of all key state fields.",
-    )
+    timestep: int = Field(default=0, ge=0)
+    nodes: list[NodeState] = Field(default_factory=list)
+    sensor_readings: dict[str, float] = Field(default_factory=dict)
+    illness_reports: list[IllnessReport] = Field(default_factory=list)
+    quarantine_status: dict[str, bool] = Field(default_factory=dict)
+    lab_results: dict[str, str] = Field(default_factory=dict)
+    traced_batches: dict[str, list[str]] = Field(default_factory=dict)
+    lab_budget: int = Field(default=0, ge=0)
+    recall_budget: int = Field(default=0, ge=0)
+    public_trust: float = Field(default=1.0, ge=0.0, le=1.0)
+    natural_language_summary: str = ""
+    goal: str = "Protect consumers by tracing contamination through the food network."
+    tool_result: str = "AMBIGUOUS"
+    error_type: str = "TRANSIENT"
+    same_error_count: int = Field(default=0, ge=0)
+    budget_remaining: float = Field(default=1.0, ge=0.0, le=1.0)
+    step_count: int = Field(default=0, ge=0)
+    last_action_error: bool = False
+    active_tool: str = "primary"
+    cooldown_remaining: int = Field(default=0, ge=0)
+    progress_hint: float = Field(default=0.0, ge=0.0, le=1.0)
+    history_tail: list[str] = Field(default_factory=list)
+    status_summary: str = ""
 
 
 class IRCEState(State):
-    """
-    Full hidden environment state (server-side only, not exposed to agents).
-
-    Contains the true (non-noisy) error type, exact progress, and all
-    mechanics flags that drive the transition function in environment.py.
-    """
-
-    goal: str = "Recover the task efficiently."
+    goal: str = "Protect consumers by tracing contamination through the food network."
     task_name: str = "easy"
-    current_error_type: str = Field(
-        default="TRANSIENT",
-        description="True error type before observation noise is applied.",
-    )
-    same_error_count: int = Field(default=0, ge=0)
-    budget_remaining: float = Field(default=1.0, ge=0.0, le=1.0)
-    progress: float = Field(default=0.0, ge=0.0, le=1.0)
-    step_count: int = Field(default=0, ge=0)
-    tool_state: str = Field(
-        default="primary",
-        description="Active tool path: 'primary' or 'backup'.",
-    )
-    replan_bonus: float = Field(default=0.0, ge=0.0, le=1.0)
-    cooldown_remaining: int = Field(default=0, ge=0)
-    ambiguous_count: int = Field(default=0, ge=0)
-    last_tool_result: str = "ERROR"
+    timestep: int = Field(default=0, ge=0)
+    nodes: dict[str, NodeState] = Field(default_factory=dict)
+    true_contamination: dict[str, float] = Field(default_factory=dict)
+    source_nodes: list[str] = Field(default_factory=list)
+    batch_records: dict[str, BatchRecord] = Field(default_factory=dict)
+    traced_batches: dict[str, list[str]] = Field(default_factory=dict)
+    edge_weights: dict[str, float] = Field(default_factory=dict)
+    lab_results: dict[str, str] = Field(default_factory=dict)
+    pending_inspections: list[PendingInspection] = Field(default_factory=list)
+    illness_reports: list[IllnessReport] = Field(default_factory=list)
+    pending_illness_reports: list[IllnessReport] = Field(default_factory=list)
+    quarantine_status: dict[str, bool] = Field(default_factory=dict)
+    alert_timers: dict[str, int] = Field(default_factory=dict)
+    lab_budget: int = Field(default=0, ge=0)
+    recall_budget: int = Field(default=0, ge=0)
+    public_trust: float = Field(default=1.0, ge=0.0, le=1.0)
+    false_signal_nodes: list[str] = Field(default_factory=list)
     history: list[str] = Field(default_factory=list)
     last_action: str = "RESET"
     last_reward: float = 0.0
+    last_outcome: str = "AMBIGUOUS"
+    compat_error_type: str = "TRANSIENT"
+    compat_same_error_count: int = Field(default=0, ge=0)
+    correct_actions: int = Field(default=0, ge=0)
+    total_actions: int = Field(default=0, ge=0)
+    false_positive_count: int = Field(default=0, ge=0)
+    contaminated_shipments: int = Field(default=0, ge=0)
+    cumulative_illness_cases: int = Field(default=0, ge=0)
+    exposed_contaminated_batches: int = Field(default=0, ge=0)
+    total_contaminated_batches: int = Field(default=0, ge=0)
+    contained_at_step: int | None = None
+    batch_counter: int = Field(default=0, ge=0)

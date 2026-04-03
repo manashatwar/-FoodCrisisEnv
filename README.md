@@ -1,367 +1,412 @@
-# IRCE: Learning Recovery Under Tool Failure
+﻿# FoodCrisisEnv
 
-**A deterministic OpenEnv benchmark for budget-aware recovery decisions in production-style tool workflows.**
+> An OpenEnv benchmark where an agent acts as a food safety investigator tracing contaminated food through a supply chain before it reaches consumers.
 
-IRCE focuses on one question:
+FoodCrisisEnv turns outbreak response into a sequential decision problem. The agent sees noisy sensor data, delayed illness reports, limited lab tests, limited recall budget, and a public-trust penalty for overreacting. It must decide when to inspect, quarantine, alert, recall, or wait.
 
-> When a tool call fails, should the agent retry, modify the request, switch tools, replan, or escalate?
+This is designed as a real operations benchmark, not a toy control task. The setting is grounded in FDA food traceability workflows and the FSMA 204 traceability rule, where investigators need to connect contaminated lots, shipment history, and late-arriving health signals under time pressure.
 
-The project is fully implemented and includes:
+## Why this benchmark exists
 
-- a working OpenEnv environment
-- 3 task levels: easy, medium, hard
-- deterministic graders with scores in `[0.0, 1.0]`
-- a reproducible baseline inference script
-- Docker and OpenEnv validation support
+Food recalls are not just detection problems. They are decision problems under uncertainty.
 
-## Why This Problem Matters
+- Sensors are noisy, so the highest reading is not always the real source.
+- Illness reports arrive late, so by the time the signal is obvious the contamination may already be downstream.
+- Budgets are limited, so inspecting every node or recalling every batch is not realistic.
+- Public trust matters, so false quarantines and unnecessary public alerts have real cost.
 
-Many LLM agents still recover from failure with simple rules such as:
+FoodCrisisEnv models that exact trade-off. The hard task is not "spot the largest number." It is "contain the outbreak quickly without shutting down the wrong branch of the supply chain."
 
-- retry up to 3 times
-- switch tools after N errors
-- stop after a fixed budget
+## Why this matters
 
-Those rules are easy to ship, but they are weak in real systems.
+Real outbreak response is messy, time-sensitive, and expensive. Human teams have to connect incomplete supplier data, noisy health signals, and time-delayed reports while deciding whether to shut down a node, recall product, or wait for more evidence. FoodCrisisEnv captures that operational pressure in a compact benchmark, which makes it useful for evaluating whether agents can help with real incident response rather than only solve clean synthetic tasks.
 
-Real tool failures are not all the same:
+## Why RL is needed
 
-- some are transient and worth retrying
-- some are structural and need input repair
-- some come from rate limits and need a cooldown or tool switch
-- some produce ambiguous outputs that look partly useful but are not fully trustworthy
-- some get worse over time as reliability drifts
+FoodCrisisEnv is not just a classification task or a static planning problem.
 
-The cost of bad recovery is real:
+- Partial observability: the true contamination level is hidden, and the agent only sees noisy sensors.
+- Delayed signals: illness reports arrive after contamination has already moved.
+- Budget trade-offs: every lab test, recall, and alert competes against limited resources and public trust.
+- Long-horizon consequences: a bad quarantine decision may look safe now but create trust damage or missed exposure later.
 
-- wasted API spend
-- wasted tokens
-- higher latency
-- repeated calls into degraded systems
-- poor user experience from obvious agent thrashing
+Simple rules work on easy outbreaks but break on the hard task. A greedy "highest sensor first" policy is vulnerable to false spikes, delayed reports, and re-seeding sources. That makes the benchmark a real sequential decision problem rather than a one-step heuristic.
 
-IRCE turns that practical recovery problem into a clean, explainable benchmark.
+## Real-world grounding
 
-## Core Idea
+The environment is inspired by FDA traceability requirements under FSMA 204 and the Food Traceability Rule. In practical terms, the environment maps to the same operational objects that food safety teams already track:
 
-IRCE is not mainly about tool selection.
+- `batch_id` plays the role of a traceable lot or shipment identifier.
+- graph edges represent critical tracking events between farms, processors, warehouses, and retailers.
+- node state stores the kind of key data an investigator would use to trace contamination.
 
-It is about **recovery policy**:
+For current regulatory context, FDA's Food Traceability Rule originally targeted January 20, 2026 for compliance and later announced enforcement would not begin before July 20, 2028. FoodCrisisEnv is therefore best understood as a benchmark inspired by the operational problem, not a legal compliance simulator.
 
-- retry when the failure looks transient
-- modify when the request looks structurally wrong
-- switch when the active tool path looks degraded or rate-limited
-- replan when the signal is ambiguous
-- escalate when continued action is wasteful
+Relevant FDA references:
+- https://www.fda.gov/food/food-safety-modernization-act-fsma/fsma-rules-guidance-industry
+- https://www.fda.gov/food/food-safety-modernization-act-fsma/food-traceability-final-rule
 
-The benchmark asks the agent to make recovery decisions under partial information, budget pressure, ambiguous outcomes, and changing failure modes.
+## Environment overview
 
-## Why RL Is a Good Fit
+The world is a directed supply-chain graph:
 
-This is a sequential decision problem with exactly the properties that make hand-written rules brittle:
+```text
+farm -> processing -> warehouse -> retailer
+```
 
-- **Partial observability**: the agent sees only observations, not the true hidden failure cause
-- **Non-stationarity**: the hard task can drift from transient issues into harder failures and rate limits
-- **Delayed reward**: good recovery choices often pay off a few steps later
-- **Action consequences**: switching tools, consuming backup routes, or escalating all change later options
-- **Rule brittleness**: a rule like "retry twice, then switch" ignores context such as budget, repeated error history, and noisy observations
+Quick visual:
 
-A fixed `max_retries` policy cannot handle those tradeoffs cleanly.
+```text
+Farm -> Processing Plant -> Warehouse -> Retail
+```
 
-## Environment Design
+Contamination usually starts upstream and becomes visible downstream later. That delay is what makes tracing difficult.
 
-### Action Space
+Each node stores:
 
-The action space is intentionally small:
+- `node_id` and `node_type`
+- hidden contamination level `true_level` in `[0.0, 1.0]`
+- visible noisy `sensor_reading`
+- `quarantined` flag
+- `batch_ids` currently at the node
+- downstream links
 
-| Action | Meaning |
-| --- | --- |
-| `RETRY` | Try the current path again |
-| `MODIFY` | Change the request to address structural failure |
-| `SWITCH` | Move between primary and backup tool paths |
-| `REPLAN` | Reframe the next attempt, especially after ambiguity or cooldown pressure |
-| `ESCALATE` | Stop early and hand off |
+Contamination starts at one or more source farms and propagates downstream every step. The agent never sees the true contamination levels directly. It only sees noisy sensor readings, delayed retailer illness reports, and results from lab inspections it explicitly requests.
 
-### Observation Space
+## What the agent sees
 
-Each observation is compact and LLM-friendly:
+Every step returns a typed observation object with FoodCrisis fields plus a legacy compatibility shim.
 
-- `goal`
-- `tool_result`
-- `error_type`
-- `same_error_count`
-- `budget_remaining`
-- `step_count`
-- `last_action_error`
-- `active_tool`
-- `cooldown_remaining`
-- `progress_hint`
-- `history_tail`
-- `status_summary`
+Primary observation fields:
 
-Important detail:
+| Field | Meaning |
+|---|---|
+| `timestep` | Current hour / step in the outbreak |
+| `nodes` | Structured node list including sensor reading, quarantine state, batches, and downstream links |
+| `sensor_readings` | Noisy contamination proxy by node |
+| `illness_reports` | Delayed retailer reports released so far |
+| `quarantine_status` | Current quarantine state per node |
+| `lab_results` | Exact contamination verdicts for completed inspections |
+| `lab_budget` | Remaining lab tests |
+| `recall_budget` | Remaining recall budget |
+| `public_trust` | Starts near 1.0 and drops when the agent overreacts |
+| `natural_language_summary` | Judge-friendly and LLM-friendly summary of the current situation |
 
-- `tool_result` can be `SUCCESS`, `ERROR`, or `AMBIGUOUS`
-- `progress_hint` is useful but not perfectly trustworthy on noisier tasks
-- `history_tail` gives a short recent trace instead of a full trajectory dump
-- `status_summary` gives a one-line, judge-readable decision context for LLM agents
+The summary is the intended decision surface for language models. It highlights the top sensor spikes, recent illness reports, quarantine state, lab updates, pending tests, remaining budgets, and public trust in one short paragraph.
 
-### Hidden State
+## Action space
 
-The hidden state keeps the environment realistic while staying lightweight:
+The environment accepts exact string actions:
 
-- current hidden failure type
-- current tool path (`primary` or `backup`)
-- remaining cooldown from rate limits
-- unresolved ambiguous outcomes
-- cumulative task progress
-- remaining budget
+| Action | Effect |
+|---|---|
+| `INSPECT <node_id>` | Spend one lab token to get an exact contamination result on the next step |
+| `QUARANTINE <node_id>` | Block all outbound spread from that node |
+| `LIFT <node_id>` | Remove quarantine and restore flow |
+| `RECALL <batch_id>` | Remove a batch from the supply chain at recall-budget cost |
+| `ALERT <node_id>` | Issue a retailer warning that slows exposure but permanently reduces trust |
+| `WAIT` | Take no direct action and let the system evolve one step |
 
-### Core Mechanics
+These are intentionally minimal. The difficulty comes from hidden state and delayed evidence, not from a large action vocabulary.
 
-IRCE adds two simple but high-value mechanics that make it feel less like a toy benchmark:
+## Hidden dynamics
 
-1. **Ambiguous outcomes**
+Each task runs the same core simulator:
 
-Some actions do not cleanly fail or succeed. They return `AMBIGUOUS`, give partial progress, and force the agent to decide whether to retry, modify, or replan.
+- contamination starts at one or more hidden source farms
+- contamination propagates downstream through weighted edges every step
+- quarantines block outgoing spread
+- alerts reduce exposure pressure for a few steps
+- sensor readings are noisy and task-dependent
+- retailer illness reports are delayed
+- Task 3 can inject false sensor spikes and periodic re-seeding of source contamination
 
-2. **Tool tradeoffs and cooldowns**
+The agent must therefore learn containment, tracing, and triage under partial observability.
 
-The backup tool path is often more reliable, but it costs more budget. Rate-limited states expose a cooldown signal, so repeatedly retrying the same path is meaningfully bad.
+## Reward signal
 
-These mechanics are cheap to simulate, deterministic with a seed, and easy for judges to understand.
+The environment gives dense step-level reward, not just an end score.
 
-## Task Suite
+- penalizes contaminated shipments moving downstream
+- penalizes newly exposed illness cases
+- rewards correct quarantine decisions
+- penalizes quarantining clean nodes
+- rewards useful inspection
+- penalizes wasted actions
+- adds time pressure while contamination is still spreading
 
-IRCE has three deterministic task profiles with clear difficulty progression.
-
-### Task 1: Easy
-
-- transient and hard failures only
-- generous budget
-- almost no observation noise
-- low ambiguity
-
-This task checks whether the agent can make basic repair decisions without overreacting.
-
-### Task 2: Medium
-
-- adds rate limits and cooldown behavior
-- moderate ambiguity
-- moderate budget pressure
-- primary versus backup tradeoff matters
-
-This task tests whether the agent can stop bad retries and route around degraded tool paths.
-
-### Task 3: Hard
-
-- lower budget
-- noisier error labels
-- drifting hidden failure modes
-- cascading penalties on repeated failure
-- costly backup routing
-
-This task asks the agent to stay stable under uncertainty while still finishing efficiently.
-
-## Reward Design
-
-The reward is dense, deterministic, and aligned with recovery quality.
-
-Positive signals:
-
-- `+0.3` for useful progress
-- `+0.15` for ambiguous partial progress
-- `+1.0` for task completion
-
-Negative signals:
-
-- `-0.1` per step
-- `-0.2` for repeated same-error failures
-- `-0.3` for bad retries on `HARD` or `RATE_LIMIT`
-- switch and backup-cost penalty
-- extra cascade penalty on harder tasks
-- early escalation penalty when the agent gives up too soon
-
-This reward encourages agents to move quickly, avoid thrashing, and treat ambiguity as something to resolve rather than ignore.
+This reward is meant to guide learning during an episode. Final leaderboard ranking is driven by the grader, not by raw summed reward alone.
 
 ## Grading
 
-Grading is deterministic and returns a final score in `[0.0, 1.0]`.
+Each episode receives a deterministic final score in `[0.0, 1.0]` from four components:
 
-The current grader combines four components:
+- `containment`: how much contaminated product was prevented from reaching retail
+- `precision`: how often the agent acted correctly instead of overreacting
+- `speed`: how early the outbreak was contained
+- `public_trust`: how much trust remained at episode end
 
-- **Completion**: full credit for success, partial credit for controlled escalation after meaningful progress
-- **Efficiency**: fewer steps is better
-- **Cost**: preserving budget is better
-- **Recovery quality**: fewer bad retries, better ambiguity handling, and cleaner exits
+Task-specific weights shift the emphasis from pure containment on easy episodes toward trust-preserving, budget-aware control on hard episodes.
 
-Formula:
+## Task suite
+
+| Task | Description | Noise | Illness delay | Lab budget | Recall budget | Max steps |
+|---|---|---:|---:|---:|---:|---:|
+| `1 - easy` | Single source, low noise, fast reports, generous budgets | `0.05` | `1` | `10` | `100` | `48` |
+| `2 - medium` | Multi-source outbreak with delayed reports and tighter budgets | `0.15` | `3` | `6` | `60` | `60` |
+| `3 - hard` | Adversarial false spikes, delayed reports, re-seeding, and high trust pressure | `0.25` | `5` | `4` | `40` | `72` |
+
+Difficulty progression is real:
+
+- Task 1 can often be solved with inspect-then-quarantine.
+- Task 2 requires prioritization across multiple branches.
+- Task 3 punishes naive "quarantine the highest sensor" strategies because some spikes are fake and the source can re-seed.
+
+## Why the hard task is hard
+
+Task 3 is designed to stress frontier agent behavior, not just basic tracing.
+
+- Adversarial sensor noise can make clean nodes look dangerous.
+- False signals force the agent to verify before overreacting.
+- Re-seeding means source farms can become hazardous again, so one early good action is not enough.
+- Trust is weighted more heavily, so blunt "quarantine everything" strategies score poorly.
+
+This creates exactly the kind of ambiguity and delayed feedback that separates robust decision-making from brittle scripted behavior.
+
+## Example episode
+
+One simple FoodCrisis trajectory looks like this:
+
+1. `INSPECT farm_a`
+   - Multiple downstream signals and a strong upstream spike suggest the source is likely on the farm branch.
+   - The agent inspects `farm_a` instead of quarantining blindly.
+2. `QUARANTINE farm_a`
+   - The inspection returns `contaminated`, so the agent locks the source before more batches move downstream.
+3. `RECALL batch_007`
+   - A contaminated batch already reached a downstream retailer, so the agent removes it from the chain instead of shutting down the whole retailer.
+4. `WAIT`
+   - The agent waits one step for another lab result instead of burning a second unnecessary action.
+
+This is the pattern judges should expect: inspect to disambiguate, quarantine to contain, recall surgically, and avoid blind shutdowns.
+
+## Baselines and compatibility
+
+This repository now includes a native deterministic baseline at [`baselines/food_crisis_agent.py`](./baselines/food_crisis_agent.py). It uses exact FoodCrisis actions and a simple strategy:
+
+- inspect suspicious high-sensor nodes
+- quarantine confirmed contaminated nodes
+- lift quarantine from confirmed clean nodes
+- recall batches from reported or confirmed affected nodes
+
+Legacy compatibility is preserved:
+
+- the package name remains `irce`
+- the existing root `inference.py` still runs without changes
+- legacy compatibility actions are mapped internally onto FoodCrisis actions so submission infrastructure does not break
+
+That compatibility path is useful for packaging and deployment, but the native FoodCrisis baseline is the clearer reference agent for this benchmark.
+
+Why the baseline is limited:
+
+- it mostly follows local sensor evidence
+- it uses shallow memory and no explicit backward tracing over the full graph
+- it cannot reason strategically about misleading spikes the way a stronger LLM or learned policy can
+
+How an LLM or learned policy can do better:
+
+- combine illness reports with upstream graph structure
+- distinguish suspicious-but-unconfirmed nodes from confirmed sources
+- spend lab budget where ambiguity is highest instead of where the sensor is merely largest
+- preserve trust by avoiding unnecessary alerts and quarantines
+
+## Common failure modes
+
+These are the mistakes that usually separate weak agents from strong ones:
+
+- Over-quarantining: aggressively shutting down high-sensor nodes without confirmation preserves safety in the short term but destroys public trust and precision.
+- Ignoring illness signals: waiting too long to act after downstream retailer reports allows contaminated batches to keep moving.
+- Wasting lab budget: spending inspections on obvious or already-resolved nodes leaves the agent blind when real ambiguity appears later.
+- Overusing alerts: alerts buy time, but repeated warnings without strong evidence make the final trust score collapse.
+
+Reference scores from `python baselines/food_crisis_agent.py` at `seed=7`:
+
+| Policy | Task 1 | Task 2 | Task 3 | Average |
+|---|---:|---:|---:|---:|
+| `FoodCrisisBaselineAgent` | `0.494` | `0.590` | `0.642` | `0.575` |
+
+These are reproducible sanity-check scores, not an optimized ceiling.
+
+## Evaluation interpretation
+
+As a rule of thumb:
+
+- around `0.30-0.50`: the agent reacts, but containment is inconsistent or too costly
+- around `0.50-0.70`: the agent is operationally useful and beats shallow heuristics
+- around `0.70-0.85`: strong performance with good containment and disciplined budget use
+- above `0.85`: very strong behavior with accurate containment, limited overreaction, and good trust preservation
+
+A score near `0.50` usually means the agent solved part of the outbreak but wasted budget, acted too late, or damaged trust. A score near `0.80` means the agent contained most contamination while staying precise.
+
+## LLM prompt template
+
+The environment is already LLM-friendly because every step includes `natural_language_summary`. A good default prompt for agentic evaluation is:
+
+System prompt:
 
 ```text
-score =
-    0.45 * completion
-  + 0.25 * efficiency
-  + 0.15 * cost
-  + 0.15 * recovery_quality
+You are a food safety incident responder controlling FoodCrisisEnv.
+Your job is to contain contamination quickly while preserving public trust and limited budgets.
+
+Priorities:
+1. Confirm likely source nodes with INSPECT when uncertainty is high.
+2. QUARANTINE confirmed contaminated nodes before more batches move downstream.
+3. RECALL contaminated or highly exposed batches when they are already in the chain.
+4. Use ALERT sparingly. It buys time but permanently reduces trust.
+5. LIFT quarantine when a node is confirmed clean.
+6. WAIT only when it is strategically useful, such as waiting for a pending lab result.
+
+Respond with exactly one valid action string and nothing else.
+Valid formats:
+- INSPECT <node_id>
+- QUARANTINE <node_id>
+- LIFT <node_id>
+- RECALL <batch_id>
+- ALERT <node_id>
+- WAIT
 ```
 
-This makes the benchmark more faithful to real-world recovery behavior than scoring on completion alone.
-
-## Example Episode
-
-Example trajectory from the current implementation:
-
-| Step | Action | Tool Result | Error Type | Tool | Budget | Reward | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | reset | ERROR | HARD | primary | 1.00 | 0.000 | Workflow starts in a hard-failure state |
-| 1 | MODIFY | SUCCESS | TRANSIENT | primary | 0.90 | 0.199 | Input repair helps and progress jumps |
-| 2 | RETRY | AMBIGUOUS | TRANSIENT | primary | 0.80 | 0.049 | Partial progress, but signal is unclear |
-| 3 | REPLAN | AMBIGUOUS | TRANSIENT | primary | 0.70 | 0.049 | Agent stabilizes the next attempt |
-| 4 | REPLAN | SUCCESS | TRANSIENT | primary | 0.60 | 0.899 | Ambiguity resolves and the task completes |
-
-This is the central IRCE behavior: the agent is judged on what it does after failure and uncertainty, not just on whether it can call a tool.
-
-### Hard-Task Snapshot
-
-The hard task is designed to look like a degraded production incident rather than a clean failure:
+User prompt:
 
 ```text
-Goal: Recover an unstable workflow under drift, ambiguity, and tight budget limits.
-Status: result=ERROR; error=RATE_LIMIT; tool=primary; budget=0.22; step=4/7; cooldown=1; repeat_errors=1; progress_hint=0.68; recent=SWITCH->SUCCESS [...] | REPLAN->ERROR [...]
+Observation summary:
+{natural_language_summary}
+
+Structured fields:
+- timestep: {timestep}
+- lab_budget: {lab_budget}
+- recall_budget: {recall_budget}
+- public_trust: {public_trust}
+- lab_results: {lab_results}
+- illness_reports: {illness_reports}
+
+Return exactly one action string.
 ```
 
-In this state, a strong policy should avoid immediate retry and prefer `SWITCH` or `REPLAN`, because cooldown pressure, low budget, and noisy signals make repeated retries wasteful.
-
-## Baseline Results
-
-The provided `inference.py` uses the OpenAI client for model calls and falls back to a deterministic rule-based policy when credentials or model requests are unavailable. The fallback policy uses:
-
-- `error_type`
-- `same_error_count`
-- `budget_remaining`
-- `step_count`
-- `active_tool`
-- `cooldown_remaining`
-- `progress_hint`
-- short memory of recent outcomes
-
-Current reproducible baseline with the default seed:
+Strict output examples:
 
 ```text
-task_1 score: 0.815
-task_2 score: 0.898
-task_3 score: 0.874
-average score: 0.863
+INSPECT farm_b
+QUARANTINE processing_p1
+RECALL farm_b_batch_004
+ALERT retailer_r2
+WAIT
 ```
 
-Across a 100-seed sweep during development, the upgraded baseline improved the average score from `0.751` to `0.805`.
-
-## Why IRCE Is Novel
-
-Benchmarks such as ToolBench and API-Bank mostly focus on whether an agent can choose and use tools correctly to finish a task.
-
-IRCE focuses on a different and highly practical question:
-
-> What should the agent do after a tool failure or ambiguous outcome?
-
-That difference matters in production systems, where many agent failures come from weak recovery behavior rather than weak tool coverage.
-
-IRCE is therefore a benchmark for:
-
-- recovery under uncertainty
-- cost-aware tool fallback
-- ambiguity resolution
-- stability under drift and cooldown pressure
-
-## Setup
+## Quick start
 
 ### Install
 
 ```bash
-uv sync
+pip install -e .
 ```
 
-Activate the project environment before running `openenv` directly:
+### Configure optional model access
 
-```bash
-source .venv/bin/activate
-# Windows PowerShell: .\.venv\Scripts\Activate.ps1
-```
-
-### Run the Environment Server
-
-```bash
-uv run uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Run the Baseline Inference Script
-
-Set the model environment variables first:
+`inference.py` supports OpenAI-compatible providers. If you do not configure a model, it falls back to a deterministic built-in policy and still prints scores.
 
 ```bash
 cp .env.example .env
 ```
 
-Required variables:
+Example Hugging Face OpenAI-compatible setup:
 
-- `OPENAI_API_KEY`
-- `API_BASE_URL`
-- `MODEL_NAME`
-- `HF_TOKEN`
-
-If the model credentials are missing or the request fails, `inference.py` falls back to the deterministic baseline policy so the script still completes reproducibly.
-
-```bash
-uv run python inference.py
+```env
+OPENAI_API_KEY=
+HF_TOKEN=hf_your_token_here
+API_BASE_URL=https://router.huggingface.co/v1
+MODEL_NAME=deepseek-ai/DeepSeek-V3-0324
 ```
 
-### Quick API Check
-
-```bash
-curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/reset
-curl -X POST http://127.0.0.1:8000/step \
-  -H "Content-Type: application/json" \
-  -d '{"action":{"action_type":"RETRY"}}'
-```
-
-## Deployment
-
-### Docker
-
-```bash
-docker build -t irce:dev .
-docker run --rm -p 8000:8000 irce:dev
-```
-
-### OpenEnv and Hugging Face Space Readiness
-
-This project is packaged for OpenEnv deployment:
-
-- `openenv.yaml` is included
-- `Dockerfile` is included
-- root `server` entrypoints are present
-- `openenv validate` passes
-
-Validation:
+### Validate
 
 ```bash
 openenv validate .
 ```
 
-## Future Work
+### Run inference
 
-The current benchmark is intentionally lightweight. Good next steps are:
+```bash
+python inference.py
+```
 
-- learned policies instead of heuristic control
-- multi-agent recovery roles
-- replay from real API failure traces
-- richer escalation policies and handoff objectives
+### Run the FoodCrisis baseline
 
-## Why IRCE Is Useful
+```bash
+python baselines/food_crisis_agent.py
+```
 
-IRCE is small enough to run cheaply, but the decision problem is real.
+### Run the server
 
-In production agent systems, the most expensive mistake is often not the first failure. It is what the agent does next.
+```bash
+uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
 
-IRCE gives that recovery problem a deterministic, OpenEnv-compatible benchmark that is easy to validate, easy to explain, and hard enough to be interesting.
+Endpoints:
+
+- `GET /health`
+- `POST /reset`
+- `POST /step`
+- `GET /state`
+
+### Docker
+
+```bash
+docker build -t food-crisis-env .
+docker run --rm -p 8000:8000 --env-file .env food-crisis-env
+```
+
+## Optional lightweight training
+
+The repository also includes a lightweight CPU-friendly training demo:
+
+```bash
+python train.py
+```
+
+This is a small GRPO-style rollout-and-update loop that demonstrates that FoodCrisisEnv supports learning from interaction without requiring a heavy RL stack.
+
+## Project layout
+
+```text
+.
+├── inference.py
+├── train.py
+├── openenv.yaml
+├── Dockerfile
+├── baselines/
+│   └── food_crisis_agent.py
+├── server/
+│   └── app.py
+├── src/irce/
+│   ├── environment.py
+│   ├── grading.py
+│   ├── models.py
+│   ├── rewards.py
+│   ├── tasks.py
+│   └── client.py
+└── tests/
+    └── test_environment.py
+```
+
+## Submission checklist
+
+- OpenEnv validation passes from repo root
+- Docker builds and serves `/health`, `/reset`, `/step`, and `/state`
+- `inference.py` runs with or without external model credentials
+- the environment is deterministic under fixed seeds
+- the grader returns scores in `[0.0, 1.0]`
+
+
+## License
+
+MIT

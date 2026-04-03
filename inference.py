@@ -1,43 +1,18 @@
 """
-inference.py
-------------
-Hackathon entry point for the IRCE OpenEnv benchmark.
+Organizer-compliant inference entry point for FoodCrisisEnv.
 
-Runs the IRCE environment across all three tasks (easy / medium / hard) and
-prints per-task and average scores. Must be run from the project root.
-
-Inference flow
---------------
-1. Load API credentials from .env (HF_TOKEN, API_BASE_URL, MODEL_NAME).
-2. Build an OpenAI-compatible client pointing at the configured LLM API.
-3. For each task (1 → 2 → 3):
-   a. Reset the environment.
-   b. At every step, build a chat prompt (system + state summary).
-   c. Call the LLM via client.chat.completions.create().
-   d. Parse the one-word action from the response.
-   e. Step the environment; repeat until done.
-4. Print scores and average.
-
-Fallback policy
----------------
-If the LLM API is unavailable (no API key, network error, etc.) the agent
-falls back to a deterministic rule-based policy (select_fallback_action)
-that achieves ~0.86 average without any API calls — ensuring the script
-always produces a valid score.
-
-Usage
------
-    python inference.py                           # API mode (uses .env)
-    python inference.py --seed 42                 # different eval seed
+Pure LLM strategy — every action decision goes through the language model.
+Rate limiting: 2.5s sleep between LLM calls keeps us inside Groq free tier (30 req/min).
+On 429 errors: backs off 65s then retries once before defaulting to WAIT.
 """
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -57,22 +32,84 @@ os.environ.setdefault("IRCE_STANDALONE", "1")
 from irce.environment import IRCEEnv
 from irce.grading import grade_episode
 from irce.models import IRCEAction, IRCEObservation
-from irce.tasks import build_task_registry
+from irce.tasks import TaskConfig, build_task_registry
 
-SUPPORTED_ACTIONS = ("RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE")
-SYSTEM_PROMPT = (
-    "You are controlling a recovery policy for IRCE. "
-    "Choose the single best recovery action based on the current error_type and context.\n\n"
-    "Decision rules (follow in order):\n"
-    "  1. error=HARD        → MODIFY  (never RETRY on HARD — it always fails)\n"
-    "  2. error=RATE_LIMIT  → SWITCH  (cooldown — switching tool path clears it)\n"
-    "  3. repeat_errors>=2  → SWITCH  (same error twice means path is stuck)\n"
-    "  4. result=AMBIGUOUS  → REPLAN  (partial signal — reframe before next attempt)\n"
-    "  5. error=TRANSIENT   → RETRY   (transient failures are safe to retry once)\n"
-    "  6. budget<0.15       → ESCALATE (too little left to keep trying)\n\n"
-    "Respond with EXACTLY one word: RETRY, MODIFY, SWITCH, REPLAN, or ESCALATE\n"
-    "No explanation. One word only."
-)
+BENCHMARK = "food-crisis-env"
+DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
+DEFAULT_MODEL_NAME = "openai/gpt-oss-20b:cheapest"
+ACTION_PATTERN = re.compile(r"^(INSPECT|QUARANTINE|LIFT|RECALL|ALERT|WAIT)(?:\s+(.+))?$", re.IGNORECASE)
+TEMPERATURE = 0.0
+MAX_TOKENS = 32
+REQUEST_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
+SUCCESS_SCORE_THRESHOLD = float(os.getenv("SUCCESS_SCORE_THRESHOLD", "0.1"))
+MAX_CONSECUTIVE_UNUSABLE_STEPS = int(os.getenv("MAX_CONSECUTIVE_UNUSABLE_STEPS", "5"))
+
+# 2.5s between calls = 24 calls/min, safely under Groq free tier (30 req/min)
+LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "2.5"))
+
+SYSTEM_PROMPT = """You are a food safety incident responder controlling FoodCrisisEnv.
+Your job: contain contamination quickly while preserving public trust and limited budgets.
+
+===== STRICT DECISION PRIORITY — follow in order =====
+
+1. LIFT first: If any node is in lab_results as "clean" AND is currently quarantined -> LIFT it.
+   Example: lab_results show farm_a=clean, quarantine_status shows farm_a=true -> output: LIFT farm_a
+
+2. QUARANTINE second: If any node is in lab_results as "contaminated" AND is NOT quarantined -> QUARANTINE it.
+   Prioritize upstream nodes (farms before processing, processing before warehouse).
+   Example: lab_results show farm_b=contaminated, not yet quarantined -> output: QUARANTINE farm_b
+
+3. RECALL third: If recall_budget >= 10 AND a batch is at a confirmed contaminated node
+   or illness-reported retailer -> RECALL it.
+   Example: farm_b is contaminated and has batch farm_b_batch_001 -> output: RECALL farm_b_batch_001
+
+4. INSPECT fourth: If lab_budget > 0 AND nodes_available_to_inspect is not empty -> pick the best one.
+   - NEVER inspect a node in already_inspected_or_pending_nodes
+   - Prefer farms > processing > warehouse > retailer
+   - Prefer nodes whose downstream retailers have illness reports
+   - Prefer nodes with highest sensor readings
+
+5. WAIT last: Only when all above options are exhausted.
+
+===== HARD RULES =====
+- NEVER output INSPECT for a node in already_inspected_or_pending_nodes
+- NEVER output QUARANTINE for a node already quarantined (quarantine_status=true)
+- NEVER output LIFT for a node that is not quarantined
+- NEVER output RECALL for a batch not in visible_batch_ids
+- ALERT only targets retailer nodes and costs trust permanently
+- Do NOT repeat the exact same action as the previous step unless new lab results arrived
+
+===== OUTPUT FORMAT =====
+Exactly one action. One line. No explanation. No JSON. No markdown.
+
+INSPECT <node_id>
+QUARANTINE <node_id>
+LIFT <node_id>
+RECALL <batch_id>
+ALERT <node_id>
+WAIT
+
+===== EXAMPLES =====
+lab_results={farm_b: contaminated}, quarantine_status={farm_b: false} -> QUARANTINE farm_b
+lab_results={farm_a: clean}, quarantine_status={farm_a: true} -> LIFT farm_a
+nodes_available_to_inspect=[farm_a, farm_b], sensor farm_b=0.82 -> INSPECT farm_b
+all nodes inspected or pending, no quarantine needed -> WAIT"""
+
+RETRY_USER_PROMPT = """Your previous response was not a valid action.
+Output ONLY one valid action on a single line. No explanation. No JSON. No markdown.
+
+Valid formats:
+INSPECT <node_id>
+QUARANTINE <node_id>
+LIFT <node_id>
+RECALL <batch_id>
+ALERT <node_id>
+WAIT
+
+Check: if lab_results has contaminated nodes not yet quarantined -> output QUARANTINE <node_id>.
+Check: if nodes_available_to_inspect is not empty and lab_budget > 0 -> output INSPECT <node_id>.
+Otherwise output WAIT."""
+
 ObservationT = TypeVar("ObservationT")
 
 
@@ -84,34 +121,18 @@ class StepResult(Generic[ObservationT]):
 
 
 @dataclass
-class PolicyMemory:
-    last_action: str | None = None
-    consecutive_failures: int = 0
-    success_count: int = 0
-    ambiguous_streak: int = 0
-    recent_results: deque[str] = field(default_factory=lambda: deque(maxlen=3))
-    recent_errors: deque[str] = field(default_factory=lambda: deque(maxlen=3))
+class ModelAccessState:
+    fatal_error: str | None = None
+    fatal_error_reported: bool = False
+    circuit_open_reason: str | None = None
+    circuit_open_reported: bool = False
+    consecutive_unusable_steps: int = 0
 
-    def update(self, action_type: str, observation: IRCEObservation) -> None:
-        self.last_action = action_type
-        self.recent_results.append(observation.tool_result)
-        self.recent_errors.append(observation.error_type)
 
-        if observation.tool_result == "SUCCESS":
-            self.success_count += 1
-            self.consecutive_failures = 0
-            self.ambiguous_streak = 0
-        elif observation.tool_result == "AMBIGUOUS":
-            self.consecutive_failures = 0
-            self.ambiguous_streak += 1
-        else:
-            self.consecutive_failures += 1
-            self.ambiguous_streak = 0
+MODEL_ACCESS_STATE = ModelAccessState()
 
 
 class LocalEnvRunner:
-    """Small StepResult adapter so inference matches the required client pattern."""
-
     def __init__(self, task_id: int, seed: int) -> None:
         self._env = IRCEEnv(task_id=task_id, seed=seed)
         self.task_id = task_id
@@ -123,224 +144,528 @@ class LocalEnvRunner:
 
     def reset(self) -> StepResult[IRCEObservation]:
         observation = self._env.reset(seed=self.seed, task_id=self.task_id)
-        return StepResult(
-            observation=observation,
-            reward=observation.reward,
-            done=observation.done,
-        )
+        return StepResult(observation=observation, reward=observation.reward, done=observation.done)
 
     def step(self, action: IRCEAction) -> StepResult[IRCEObservation]:
         observation = self._env.step(action)
-        return StepResult(
-            observation=observation,
-            reward=observation.reward,
-            done=observation.done,
-        )
+        return StepResult(observation=observation, reward=observation.reward, done=observation.done)
 
     def close(self) -> None:
         return None
 
 
-def select_fallback_action(observation: IRCEObservation, memory: PolicyMemory) -> str:
-    if (
-        observation.budget_remaining <= 0.12
-        and memory.consecutive_failures >= 3
-        and observation.progress_hint < 0.5
-    ):
-        return "ESCALATE"
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
 
-    if observation.tool_result == "AMBIGUOUS":
-        if observation.progress_hint >= 0.7:
-            return "REPLAN"
-        if observation.error_type == "HARD":
-            return "MODIFY"
-        if observation.error_type == "RATE_LIMIT" or observation.cooldown_remaining > 0:
-            return "REPLAN"
-        return "REPLAN" if memory.ambiguous_streak >= 1 else "RETRY"
 
-    if observation.cooldown_remaining > 0:
-        return "SWITCH"
+def normalize_single_line(value: str) -> str:
+    return " ".join(str(value).split())
 
-    if observation.error_type == "RATE_LIMIT":
-        return "SWITCH" if observation.active_tool == "primary" else "REPLAN"
 
-    if observation.same_error_count >= 2:
-        return "SWITCH" if observation.active_tool == "primary" else "REPLAN"
+def visible_batch_ids(observation: IRCEObservation) -> list[str]:
+    batch_ids: list[str] = []
+    seen: set[str] = set()
+    for node in observation.nodes:
+        for batch_id in node.batch_ids:
+            normalized = batch_id.strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                batch_ids.append(normalized)
+    return batch_ids
 
-    if observation.error_type == "HARD":
-        if observation.active_tool == "primary" and memory.last_action != "MODIFY":
-            return "MODIFY"
-        return "SWITCH"
 
-    if observation.error_type == "TRANSIENT":
-        if observation.progress_hint >= 0.7:
-            return "RETRY"
-        if memory.consecutive_failures >= 1:
-            return "SWITCH"
-        return "RETRY" if observation.active_tool == "primary" else "SWITCH"
+def available_node_ids(observation: IRCEObservation) -> list[str]:
+    return [node.node_id for node in observation.nodes]
 
-    return "REPLAN"
+
+def extract_pending_inspection_nodes(observation: IRCEObservation) -> list[str]:
+    summary = observation.natural_language_summary or ""
+    match = re.search(r"Pending lab tests:\s*([^.]*)\.", summary)
+    if match is None:
+        return []
+    payload = normalize_single_line(match.group(1))
+    if not payload or payload.lower() == "none":
+        return []
+    pending_nodes: list[str] = []
+    seen: set[str] = set()
+    for item in payload.split(","):
+        node_id = item.strip().split("@", 1)[0].strip().lower()
+        if node_id and node_id not in seen:
+            seen.add(node_id)
+            pending_nodes.append(node_id)
+    return pending_nodes
+
+
+def inspected_or_pending_nodes(observation: IRCEObservation) -> list[str]:
+    combined = {node_id.lower() for node_id in observation.lab_results}
+    combined.update(extract_pending_inspection_nodes(observation))
+    return sorted(combined)
+
+
+def uninspected_nodes(observation: IRCEObservation) -> list[str]:
+    all_nodes = {n.lower() for n in available_node_ids(observation)}
+    already_done = set(inspected_or_pending_nodes(observation))
+    return sorted(all_nodes - already_done)
 
 
 def build_user_prompt(step: int, observation: IRCEObservation, history: list[str]) -> str:
-    recent_history = "\n".join(history[-3:]) if history else "none"
+    recent_history = "\n".join(history[-4:]) if history else "none"
+    illness_payload = [report.model_dump() for report in observation.illness_reports]
+    node_ids = ", ".join(available_node_ids(observation)) or "none"
+    batch_ids = ", ".join(visible_batch_ids(observation)) or "none"
+    pending_text = ", ".join(extract_pending_inspection_nodes(observation)) or "none"
+    inspected_pending_text = ", ".join(inspected_or_pending_nodes(observation)) or "none"
+    uninspected_text = ", ".join(uninspected_nodes(observation)) or "none"
+
+    # Explicit action hints — removes ambiguity for the model
+    hints: list[str] = []
+
+    to_quarantine = [
+        nid for nid, result in observation.lab_results.items()
+        if result == "contaminated" and not observation.quarantine_status.get(nid, False)
+    ]
+    if to_quarantine:
+        hints.append(
+            f"ACTION REQUIRED: Confirmed contaminated and NOT quarantined: "
+            f"{', '.join(sorted(to_quarantine))} -> QUARANTINE one NOW."
+        )
+
+    to_lift = [
+        nid for nid, result in observation.lab_results.items()
+        if result == "clean" and observation.quarantine_status.get(nid, False)
+    ]
+    if to_lift:
+        hints.append(
+            f"ACTION AVAILABLE: Confirmed clean but still quarantined: "
+            f"{', '.join(sorted(to_lift))} -> LIFT one."
+        )
+
+    if not to_quarantine and not to_lift and not uninspected_nodes(observation) and pending_text != "none":
+        hints.append("All nodes inspected or pending. Await lab results -> WAIT.")
+
+    hint_block = "\n".join(hints) if hints else "No urgent action hints — use your judgment."
+
     return (
-        f"Task step: {step}\n"
-        f"Goal: {observation.goal}\n"
-        f"Status: {observation.status_summary}\n"
-        f"Recent history:\n{recent_history}\n"
-        "Respond with exactly one action name: RETRY, MODIFY, SWITCH, REPLAN, or ESCALATE."
+        f"=== STEP {step} OBSERVATION ===\n\n"
+        f"Natural language summary:\n{observation.natural_language_summary}\n\n"
+        f"=== ACTION HINTS ===\n{hint_block}\n\n"
+        "=== STRUCTURED FIELDS ===\n"
+        f"- lab_results: {json.dumps(observation.lab_results, sort_keys=True, separators=(',', ':'))}\n"
+        f"- quarantine_status: {json.dumps(observation.quarantine_status, sort_keys=True, separators=(',', ':'))}\n"
+        f"- sensor_readings: {json.dumps(observation.sensor_readings, sort_keys=True, separators=(',', ':'))}\n"
+        f"- pending_inspections: {pending_text}\n"
+        f"- already_inspected_or_pending_nodes: {inspected_pending_text}\n"
+        f"- nodes_available_to_inspect: {uninspected_text}\n"
+        f"- illness_reports: {json.dumps(illness_payload, sort_keys=True, separators=(',', ':'))}\n"
+        f"- lab_budget: {observation.lab_budget}\n"
+        f"- recall_budget: {observation.recall_budget}\n"
+        f"- public_trust: {observation.public_trust:.2f}\n"
+        f"- visible_batch_ids: {batch_ids}\n"
+        f"- available_node_ids: {node_ids}\n"
+        f"- recent_history:\n{recent_history}\n\n"
+        "Output exactly one valid action."
     )
 
 
-def build_openai_client() -> tuple[Any | None, str, str]:
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN") or ""
-    base_url = os.getenv("API_BASE_URL", "").strip()
-    model_name_env = os.getenv("MODEL_NAME", "").strip()
+def build_openai_client() -> tuple[Any, str]:
+    api_key = (os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "").strip()
+    base_url = (os.getenv("API_BASE_URL") or DEFAULT_API_BASE_URL).strip()
+    model_name = (os.getenv("MODEL_NAME") or DEFAULT_MODEL_NAME).strip()
 
-    if not api_key or not model_name_env:
-        return None, model_name_env, "OPENAI_API_KEY/HF_TOKEN or MODEL_NAME missing"
+    if not api_key:
+        raise SystemExit("Missing HF_TOKEN in environment configuration.")
+    if not model_name:
+        raise SystemExit("Missing MODEL_NAME in environment configuration.")
 
     try:
         from openai import OpenAI
-    except Exception as exc:  # noqa: BLE001
-        return None, model_name_env, f"OpenAI SDK import failed: {exc}"
+    except Exception as exc:
+        raise SystemExit(f"OpenAI SDK import failed: {exc}") from exc
 
-    client_kwargs: dict[str, Any] = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
-
-    return OpenAI(**client_kwargs), model_name_env, ""
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    return client, model_name
 
 
-def parse_model_action(response_text: str) -> str | None:
-    if not response_text:
-        return None
+def extract_completion_text(completion: Any) -> str:
+    content = completion.choices[0].message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            text = item.get("text") if isinstance(item, dict) else getattr(item, "text", None)
+            if text:
+                parts.append(str(text))
+        return "".join(parts)
+    return str(content or "")
 
-    text = response_text.strip()
+
+def debug_to_stderr(*parts: object) -> None:
+    print(*parts, file=sys.stderr, flush=True)
+
+
+def is_fatal_provider_error(exc: Exception) -> bool:
+    text = normalize_single_line(str(exc)).lower()
+    return any(marker in text for marker in (
+        "error code: 401", "error code: 402", "error code: 403",
+        "insufficient_quota", "depleted your monthly included credits",
+        "invalid api key", "authentication", "permission",
+    ))
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    text = normalize_single_line(str(exc)).lower()
+    return "error code: 429" in text or "rate_limit" in text or "rate limit" in text
+
+
+def strip_outer_quotes(text: str) -> str:
+    stripped = text.strip().strip("`")
+    while len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
+        stripped = stripped[1:-1].strip()
+    return stripped
+
+
+def candidate_texts_from_response(response_text: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: str | None) -> None:
+        if not candidate:
+            return
+        normalized = candidate.strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    raw = response_text.strip()
+    add(raw)
+    first_line = raw.splitlines()[0].strip() if raw else ""
+    add(first_line)
+    add(strip_outer_quotes(first_line))
 
     try:
-        payload = json.loads(text)
+        payload = json.loads(raw)
         if isinstance(payload, dict):
-            candidate = str(payload.get("action_type", "")).strip().upper()
-            if candidate in SUPPORTED_ACTIONS:
-                return candidate
+            for key in ("action", "action_type", "command", "output", "response"):
+                if isinstance(payload.get(key), str):
+                    add(payload[key])
     except json.JSONDecodeError:
         pass
 
-    match = re.search(r"\b(RETRY|MODIFY|SWITCH|REPLAN|ESCALATE)\b", text.upper())
-    return match.group(1) if match else None
+    return candidates
+
+
+def parse_candidate_action(candidate: str, observation: IRCEObservation) -> str | None:
+    first_line = strip_outer_quotes(candidate.splitlines()[0].strip())
+    text = normalize_single_line(first_line)
+    if not text:
+        return None
+
+    match = ACTION_PATTERN.fullmatch(text)
+    if match is None:
+        search_match = re.search(
+            r"\b(INSPECT|QUARANTINE|LIFT|RECALL|ALERT|WAIT)\b(?:\s+([A-Za-z0-9_\-]+))?",
+            text, re.IGNORECASE,
+        )
+        if search_match is None:
+            return None
+        verb = search_match.group(1).upper()
+        target = strip_outer_quotes(search_match.group(2) or "")
+    else:
+        verb = match.group(1).upper()
+        target = strip_outer_quotes(match.group(2) or "")
+
+    target = normalize_single_line(target)
+
+    if verb == "WAIT":
+        return "WAIT" if not target else None
+    if not target:
+        return None
+
+    normalized_target = target.lower()
+    node_lookup = {node.node_id.lower(): node for node in observation.nodes}
+    batch_lookup = set(visible_batch_ids(observation))
+
+    if verb in {"INSPECT", "QUARANTINE", "LIFT"}:
+        return f"{verb} {normalized_target}" if normalized_target in node_lookup else None
+    if verb == "ALERT":
+        node = node_lookup.get(normalized_target)
+        return f"ALERT {normalized_target}" if (node and node.node_type == "retailer") else None
+    if verb == "RECALL":
+        return f"RECALL {normalized_target}" if normalized_target in batch_lookup else None
+
+    return None
+
+
+def parse_model_action(response_text: str, observation: IRCEObservation) -> str | None:
+    for candidate in candidate_texts_from_response(response_text):
+        parsed = parse_candidate_action(candidate, observation)
+        if parsed:
+            return parsed
+    return None
+
+
+def apply_action_guard(action_str: str, observation: IRCEObservation) -> str:
+    """Block actions that would be wasted or cause errors in the environment."""
+    parts = action_str.split(" ", 1)
+    verb = parts[0].upper()
+    target = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    pending_nodes = set(extract_pending_inspection_nodes(observation))
+    known_results = {nid.lower(): result for nid, result in observation.lab_results.items()}
+
+    if verb == "INSPECT":
+        if target in pending_nodes:
+            debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (already pending)")
+            return "WAIT"
+        if target in known_results:
+            debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (result already known)")
+            return "WAIT"
+
+    if verb == "QUARANTINE":
+        if observation.quarantine_status.get(target, False):
+            debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> WAIT (already quarantined)")
+            return "WAIT"
+
+    if verb == "LIFT":
+        if not observation.quarantine_status.get(target, False):
+            debug_to_stderr(f"ACTION_GUARD: LIFT {target} -> WAIT (not quarantined)")
+            return "WAIT"
+
+    return action_str
+
+
+def request_model_completion(client: Any, model_name: str, messages: list[dict[str, str]]) -> str:
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
+        stream=False,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    return extract_completion_text(completion)
 
 
 def request_action(
     *,
-    client: Any | None,
+    client: Any,
     model_name: str,
     observation: IRCEObservation,
-    memory: PolicyMemory,
     history: list[str],
     step: int,
-) -> tuple[str, str]:
-    fallback_action = select_fallback_action(observation, memory)
-    if client is None or not model_name:
-        return fallback_action, "fallback"
+    access_state: ModelAccessState,
+) -> str:
+    if access_state.fatal_error is not None:
+        if not access_state.fatal_error_reported:
+            debug_to_stderr("FATAL_PROVIDER_ERROR:", access_state.fatal_error)
+            access_state.fatal_error_reported = True
+        return "WAIT"
+    if access_state.circuit_open_reason is not None:
+        if not access_state.circuit_open_reported:
+            debug_to_stderr("MODEL_CIRCUIT_OPEN:", access_state.circuit_open_reason)
+            access_state.circuit_open_reported = True
+        return "WAIT"
 
+    # Rate-limit sleep — keeps Groq free tier inside 30 req/min
+    time.sleep(LLM_RATE_LIMIT_SLEEP)
+
+    user_prompt = build_user_prompt(step, observation, history)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(step, observation, history)},
+        {"role": "user", "content": user_prompt},
     ]
 
     try:
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=12,
-            stream=False,
-        )
-        response_text = completion.choices[0].message.content or ""
-        parsed_action = parse_model_action(response_text)
+        response_text = request_model_completion(client, model_name, messages)
+        debug_to_stderr("RAW_MODEL_OUTPUT:", response_text)
+
+        parsed_action = parse_model_action(response_text, observation)
         if parsed_action:
-            return parsed_action, "model"
-    except Exception as exc:  # noqa: BLE001
-        print(f"Model request failed ({exc}). Using fallback action.")
+            access_state.consecutive_unusable_steps = 0
+            return parsed_action
 
-    return fallback_action, "fallback"
+        # Retry once on invalid response
+        time.sleep(LLM_RATE_LIMIT_SLEEP)
+        retry_messages = messages + [
+            {"role": "assistant", "content": response_text},
+            {"role": "user", "content": RETRY_USER_PROMPT},
+        ]
+        retry_text = request_model_completion(client, model_name, retry_messages)
+        debug_to_stderr("RAW_MODEL_OUTPUT_RETRY:", retry_text)
+
+        retry_action = parse_model_action(retry_text, observation)
+        if retry_action:
+            access_state.consecutive_unusable_steps = 0
+            return retry_action
+
+        access_state.consecutive_unusable_steps += 1
+        if access_state.consecutive_unusable_steps >= MAX_CONSECUTIVE_UNUSABLE_STEPS:
+            access_state.circuit_open_reason = (
+                f"{access_state.consecutive_unusable_steps} consecutive unusable model turns; "
+                "defaulting to WAIT for remaining steps"
+            )
+
+    except Exception as exc:
+        debug_to_stderr("MODEL_REQUEST_ERROR:", exc)
+
+        if is_fatal_provider_error(exc):
+            access_state.fatal_error = str(exc)
+
+        elif is_rate_limit_error(exc):
+            # Hard 429 despite sleep — back off 65s and retry once
+            debug_to_stderr("RATE_LIMIT_HIT: sleeping 65s before retry")
+            time.sleep(65.0)
+            try:
+                response_text = request_model_completion(client, model_name, messages)
+                debug_to_stderr("RAW_MODEL_OUTPUT_AFTER_BACKOFF:", response_text)
+                parsed = parse_model_action(response_text, observation)
+                if parsed:
+                    access_state.consecutive_unusable_steps = 0
+                    return parsed
+            except Exception as retry_exc:
+                debug_to_stderr("MODEL_REQUEST_ERROR_AFTER_BACKOFF:", retry_exc)
+            access_state.consecutive_unusable_steps += 1
+
+        else:
+            access_state.consecutive_unusable_steps += 1
+            if access_state.consecutive_unusable_steps >= MAX_CONSECUTIVE_UNUSABLE_STEPS:
+                access_state.circuit_open_reason = (
+                    f"{access_state.consecutive_unusable_steps} consecutive failures; "
+                    "defaulting to WAIT for remaining steps"
+                )
+
+    return "WAIT"
 
 
-def run_task(task_id: int, seed: int, client: Any | None, model_name: str) -> float:
-    task_config = build_task_registry()[task_id]
+# ---------------------------------------------------------------------------
+# Logging — matches sample inference script format exactly
+# ---------------------------------------------------------------------------
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(
+        f"[START] task={normalize_single_line(task)} env={normalize_single_line(env)} model={normalize_single_line(model)}",
+        flush=True,
+    )
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+    error_val = normalize_single_line(error) if error else "null"
+    done_val = str(bool(done)).lower()
+    print(
+        f'[STEP] step={step} action="{normalize_single_line(action)}" reward={reward:.2f} done={done_val} error={error_val}',
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(bool(success)).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+def extract_step_error(observation: IRCEObservation) -> str | None:
+    return "action_error" if observation.last_action_error else None
+
+
+# ---------------------------------------------------------------------------
+# Episode runner
+# ---------------------------------------------------------------------------
+
+def run_task(task_id: int, task_config: TaskConfig, seed: int, client: Any, model_name: str) -> float:
+    # Reset per task — errors on task 1 must not silence tasks 2 and 3
+    MODEL_ACCESS_STATE.fatal_error = None
+    MODEL_ACCESS_STATE.fatal_error_reported = False
+    MODEL_ACCESS_STATE.circuit_open_reason = None
+    MODEL_ACCESS_STATE.circuit_open_reported = False
+    MODEL_ACCESS_STATE.consecutive_unusable_steps = 0
+
     env = LocalEnvRunner(task_id=task_id, seed=seed)
-    memory = PolicyMemory()
     history: list[str] = []
+    rewards: list[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
+
+    log_start(task=task_config.name, env=BENCHMARK, model=model_name)
 
     try:
         result = env.reset()
         observation = result.observation
-        print(f"task_{task_id} reset:", observation.model_dump())
 
         for step in range(1, task_config.max_steps + 1):
             if result.done:
                 break
 
-            action_type, source = request_action(
+            action_str = request_action(
                 client=client,
                 model_name=model_name,
                 observation=observation,
-                memory=memory,
                 history=history,
                 step=step,
+                access_state=MODEL_ACCESS_STATE,
             )
-            print(f"task_{task_id} step_{step}: {source} -> {action_type}")
+            action_str = apply_action_guard(action_str, observation)
 
-            result = env.step(IRCEAction(action_type=action_type))
+            debug_to_stderr(
+                f"STEP {step} | final_action={action_str} | "
+                f"lab_budget={observation.lab_budget} | trust={observation.public_trust:.2f}"
+            )
+
+            result = env.step(IRCEAction(action_type=action_str))
             observation = result.observation
             reward = float(result.reward or 0.0)
-            memory.update(action_type, observation)
+            done = bool(result.done)
+            error = extract_step_error(observation)
 
-            history_line = (
-                f"step={step} action={action_type} result={observation.tool_result} "
-                f"reward={reward:+.3f} done={result.done}"
+            rewards.append(reward)
+            steps_taken = step
+            log_step(step=step, action=action_str, reward=reward, done=done, error=error)
+
+            history.append(
+                f"step={step} action={action_str} reward={reward:+.2f} "
+                f"result={observation.tool_result} done={str(done).lower()}"
             )
-            history.append(history_line)
-            print("  observation:", observation.model_dump())
 
-            if result.done:
+            if done:
                 break
 
-        score = grade_episode(env.episode_log)
-        print(f"task_{task_id} score: {score:.3f}")
+        score = clamp01(grade_episode(env.episode_log))
+        success = score >= SUCCESS_SCORE_THRESHOLD
         return score
+
     finally:
-        env.close()
+        try:
+            env.close()
+        except Exception:
+            pass
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
-def _parse_inference_args() -> Any:
+def parse_args() -> Any:
     import argparse
-    p = argparse.ArgumentParser(description="IRCE inference runner.")
-
-    p.add_argument("--seed", type=int, default=7, help="Evaluation seed (default: 7).")
-    return p.parse_args()
+    parser = argparse.ArgumentParser(description="FoodCrisisEnv organizer-compliant inference runner.")
+    parser.add_argument("--seed", type=int, default=7, help="Evaluation seed shared across tasks.")
+    return parser.parse_args()
 
 
 def main() -> None:
     load_dotenv()
-    args = _parse_inference_args()
-
-    client, model_name, client_status = build_openai_client()
-    if client is None:
-        print(f"Client not configured ({client_status}). Using deterministic fallback policy.")
-    else:
-        print(f"OpenAI client configured for model '{model_name}'.")
-
-    seed = args.seed
+    args = parse_args()
+    client, model_name = build_openai_client()
     task_registry = build_task_registry()
-    scores = [
-        run_task(task_id=task_id, seed=seed, client=client, model_name=model_name)
-        for task_id in sorted(task_registry)
-    ]
-    average_score = sum(scores) / len(scores)
-    print(f"average score: {average_score:.3f}")
+
+    for task_id in sorted(task_registry):
+        run_task(
+            task_id=task_id,
+            task_config=task_registry[task_id],
+            seed=args.seed,
+            client=client,
+            model_name=model_name,
+        )
 
 
 if __name__ == "__main__":

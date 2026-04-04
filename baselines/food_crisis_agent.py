@@ -11,11 +11,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-os.environ.setdefault("IRCE_STANDALONE", "1")
+os.environ.setdefault("FOODCRISIS_STANDALONE", "1")
 
-from irce.environment import IRCEEnv
+from irce.environment import FoodCrisisEnv
 from irce.grading import grade_episode
-from irce.models import IRCEAction, IRCEObservation, NodeState
+from irce.models import FoodCrisisAction, FoodCrisisObservation, NodeState
 from irce.tasks import TASKS
 
 NODE_PRIORITY = {"farm": 0, "processing": 1, "warehouse": 2, "retailer": 3}
@@ -27,7 +27,7 @@ class BaselineMemory:
     recalled_batches: set[str] = field(default_factory=set)
     alerted_retailers: set[str] = field(default_factory=set)
 
-    def sync(self, observation: IRCEObservation) -> None:
+    def sync(self, observation: FoodCrisisObservation) -> None:
         self.pending_inspections.difference_update(observation.lab_results.keys())
 
 
@@ -40,7 +40,7 @@ class FoodCrisisBaselineAgent:
     def reset(self) -> None:
         self.memory = BaselineMemory()
 
-    def act(self, observation: IRCEObservation) -> str:
+    def act(self, observation: FoodCrisisObservation) -> str:
         self.memory.sync(observation)
         nodes = {node.node_id: node for node in observation.nodes}
 
@@ -69,7 +69,7 @@ class FoodCrisisBaselineAgent:
 
         return "WAIT"
 
-    def _choose_lift_target(self, observation: IRCEObservation) -> str | None:
+    def _choose_lift_target(self, observation: FoodCrisisObservation) -> str | None:
         candidates = [
             node_id
             for node_id, result in observation.lab_results.items()
@@ -77,7 +77,7 @@ class FoodCrisisBaselineAgent:
         ]
         return sorted(candidates)[0] if candidates else None
 
-    def _choose_quarantine_target(self, observation: IRCEObservation) -> str | None:
+    def _choose_quarantine_target(self, observation: FoodCrisisObservation) -> str | None:
         contaminated_nodes = [
             node_id
             for node_id, result in observation.lab_results.items()
@@ -93,7 +93,7 @@ class FoodCrisisBaselineAgent:
 
     def _choose_recall_batch(
         self,
-        observation: IRCEObservation,
+        observation: FoodCrisisObservation,
         nodes: dict[str, NodeState],
     ) -> str | None:
         if observation.recall_budget < 10:
@@ -118,7 +118,7 @@ class FoodCrisisBaselineAgent:
 
     def _choose_inspection_target(
         self,
-        observation: IRCEObservation,
+        observation: FoodCrisisObservation,
         nodes: dict[str, NodeState],
     ) -> str | None:
         if observation.lab_budget <= 0:
@@ -150,7 +150,7 @@ class FoodCrisisBaselineAgent:
 
     def _choose_alert_target(
         self,
-        observation: IRCEObservation,
+        observation: FoodCrisisObservation,
         nodes: dict[str, NodeState],
     ) -> str | None:
         if observation.public_trust <= 0.35:
@@ -172,7 +172,7 @@ class FoodCrisisBaselineAgent:
             return target.node_id
         return None
 
-    def _node_type(self, observation: IRCEObservation, node_id: str) -> str:
+    def _node_type(self, observation: FoodCrisisObservation, node_id: str) -> str:
         for node in observation.nodes:
             if node.node_id == node_id:
                 return node.node_type
@@ -180,13 +180,13 @@ class FoodCrisisBaselineAgent:
 
 
 def run_episode(task_id: int, seed: int) -> float:
-    env = IRCEEnv(task_id=task_id, seed=seed)
+    env = FoodCrisisEnv(task_id=task_id, seed=seed)
     agent = FoodCrisisBaselineAgent()
     observation = env.reset(seed=seed, task_id=task_id)
 
     while not observation.done:
         action = agent.act(observation)
-        observation = env.step(IRCEAction(action_type=action))
+        observation = env.step(FoodCrisisAction(action_type=action))
 
     return grade_episode(env.episode_log)
 

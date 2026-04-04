@@ -4,7 +4,7 @@ import os
 import random
 from typing import Generic, TypeVar
 
-if os.getenv("IRCE_STANDALONE") == "1":
+if os.getenv("FOODCRISIS_STANDALONE") == "1":
     ActionT = TypeVar("ActionT")
     ObservationT = TypeVar("ObservationT")
     StateT = TypeVar("StateT")
@@ -28,20 +28,19 @@ else:
 
 from irce.models import (
     BatchRecord,
-    FOOD_ACTIONS,
-    IRCEAction,
-    IRCEObservation,
-    IRCEState,
+    FoodCrisisAction,
+    FoodCrisisObservation,
+    FoodCrisisState,
     IllnessReport,
-    LEGACY_ACTIONS,
     NodeState,
     PendingInspection,
+    SUPPORTED_ACTIONS,
 )
 from irce.rewards import compute_step_reward
 from irce.tasks import TaskConfig, get_task_config
 
 
-class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
+class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCrisisState]):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self, task_id: int = 1, seed: int | None = 7) -> None:
@@ -55,10 +54,10 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         self._downstream_map: dict[str, tuple[str, ...]] = {}
         self._upstream_map: dict[str, list[str]] = {}
         self._node_types: dict[str, str] = {}
-        self._state = IRCEState(episode_id=self._build_episode_id(self._default_seed))
+        self._state = FoodCrisisState(episode_id=self._build_episode_id(self._default_seed))
         self._set_task(self.task_id)
 
-    def reset(self, seed: int | None = None, episode_id: str | None = None, **kwargs: object) -> IRCEObservation:
+    def reset(self, seed: int | None = None, episode_id: str | None = None, **kwargs: object) -> FoodCrisisObservation:
         requested_task_id = kwargs.pop("task_id", self.task_id)
         self.task_id = int(requested_task_id)
         self._set_task(self.task_id)
@@ -69,7 +68,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         self._episode_index += 1
         self.episode_log = []
 
-        state = IRCEState(
+        state = FoodCrisisState(
             episode_id=episode_id or self._build_episode_id(episode_seed),
             goal=self.task_config.goal,
             task_name=self.task_config.name,
@@ -115,7 +114,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             note="Initial outbreak state prepared.",
         )
 
-    def step(self, action: IRCEAction, timeout_s: float | None = None, **kwargs: object) -> IRCEObservation:
+    def step(self, action: FoodCrisisAction, timeout_s: float | None = None, **kwargs: object) -> FoodCrisisObservation:
         del timeout_s, kwargs
 
         if not self._state.nodes or not self._state.true_contamination:
@@ -142,10 +141,10 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         last_action_error = False
         note = ""
 
-        if verb not in FOOD_ACTIONS:
+        if verb not in SUPPORTED_ACTIONS:
             wasted_action = True
             last_action_error = True
-            note = f"Unsupported action '{requested_action}'."
+            note = f"Unsupported action '{requested_action}'. Valid actions: {', '.join(sorted(SUPPORTED_ACTIONS))}"
         elif verb == "WAIT":
             note = "Agent waited for additional evidence."
         elif verb == "INSPECT":
@@ -350,7 +349,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         return observation
 
     @property
-    def state(self) -> IRCEState:
+    def state(self) -> FoodCrisisState:
         return self._state
 
     def _set_task(self, task_id: int) -> None:
@@ -362,7 +361,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             for downstream in downstream_nodes:
                 self._upstream_map[downstream].append(source)
 
-    def _seed_batches(self, state: IRCEState) -> None:
+    def _seed_batches(self, state: FoodCrisisState) -> None:
         for farm_id in self.task_config.farm_ids:
             for _ in range(self.task_config.batches_per_farm):
                 state.batch_counter += 1
@@ -382,7 +381,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
                 if contaminated:
                     state.total_contaminated_batches += 1
 
-    def _assign_false_signals(self, state: IRCEState) -> None:
+    def _assign_false_signals(self, state: FoodCrisisState) -> None:
         if self.task_config.false_signal_count <= 0:
             return
         candidates = [node_id for node_id in self.task_config.node_ids if node_id not in state.source_nodes]
@@ -404,14 +403,12 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
                 break
         return path
 
-    def _resolve_action(self, action: IRCEAction) -> tuple[str, str | None, str]:
+    def _resolve_action(self, action: FoodCrisisAction) -> tuple[str, str | None, str]:
         verb = action.verb
         target = action.target
 
         if verb == "WAIT":
             return "WAIT", None, "WAIT"
-        if verb in LEGACY_ACTIONS:
-            return self._resolve_legacy_action(verb)
         if verb in {"INSPECT", "QUARANTINE"} and not target:
             target = self._select_suspect_node()
         elif verb == "LIFT" and not target:
@@ -423,35 +420,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         elif verb == "ALERT" and not target:
             target = self._select_alert_target()
         return verb, target, f"{verb} {target}".strip()
-
-    def _resolve_legacy_action(self, legacy_verb: str) -> tuple[str, str | None, str]:
-        if legacy_verb == "MODIFY":
-            target = self._select_suspect_node()
-            return "INSPECT", target, f"INSPECT {target}".strip()
-        if legacy_verb == "SWITCH":
-            target = self._select_suspect_node(prefer_upstream=True)
-            return "QUARANTINE", target, f"QUARANTINE {target}".strip()
-        if legacy_verb == "REPLAN":
-            alert_target = self._select_alert_target()
-            if alert_target is not None:
-                return "ALERT", alert_target, f"ALERT {alert_target}".strip()
-            batch_id = self._select_batch_to_recall()
-            if batch_id is not None:
-                return "RECALL", batch_id, f"RECALL {batch_id}".strip()
-            target = self._select_suspect_node()
-            return "INSPECT", target, f"INSPECT {target}".strip()
-        if legacy_verb == "RETRY":
-            if self._state.pending_inspections:
-                return "WAIT", None, "WAIT"
-            target = self._select_suspect_node()
-            return "INSPECT", target, f"INSPECT {target}".strip()
-        if legacy_verb == "ESCALATE":
-            alert_target = self._select_alert_target()
-            if alert_target is not None:
-                return "ALERT", alert_target, f"ALERT {alert_target}".strip()
-            return "WAIT", None, "WAIT"
-        return "WAIT", None, "WAIT"
-    def _select_suspect_node(self, prefer_upstream: bool = True) -> str | None:
+    def _select_suspect_node(self) -> str | None:
         best_node = None
         best_score = float("-inf")
         report_nodes = {report.retailer_id for report in self._state.illness_reports}
@@ -464,8 +433,6 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
                 report_bonus = 0.25
             quarantine_penalty = -0.1 if node.quarantined else 0.0
             risk = sensor + node_bonus + report_bonus + quarantine_penalty
-            if prefer_upstream and node.node_type == "retailer":
-                risk -= 0.1
             if risk > best_score:
                 best_score = risk
                 best_node = node_id
@@ -531,7 +498,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         quarantine_penalty = -0.05 if self._state.quarantine_status.get(retailer_id) else 0.0
         return sensor + report_bonus + quarantine_penalty
 
-    def _apply_clean_quarantine_trust_drain(self, state: IRCEState) -> None:
+    def _apply_clean_quarantine_trust_drain(self, state: FoodCrisisState) -> None:
         clean_quarantines = 0
         for node_id, quarantined in state.quarantine_status.items():
             if quarantined and state.true_contamination[node_id] < self.task_config.contamination_threshold:
@@ -539,7 +506,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         if clean_quarantines:
             state.public_trust = max(0.0, round(state.public_trust - (0.05 * clean_quarantines), 3))
 
-    def _propagate_contamination(self, state: IRCEState) -> None:
+    def _propagate_contamination(self, state: FoodCrisisState) -> None:
         new_levels = dict(state.true_contamination)
         for node_id in self.task_config.node_ids:
             inflow = 0.0
@@ -550,7 +517,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             new_levels[node_id] = round(min(1.0, state.true_contamination[node_id] + inflow), 3)
         state.true_contamination = new_levels
 
-    def _reseed_if_needed(self, state: IRCEState) -> None:
+    def _reseed_if_needed(self, state: FoodCrisisState) -> None:
         if self.task_config.reseed_interval is None:
             return
         if state.timestep == 0 or state.timestep % self.task_config.reseed_interval != 0:
@@ -572,7 +539,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             state.nodes[source].batch_ids.append(batch_id)
             state.total_contaminated_batches += 1
 
-    def _move_batches(self, state: IRCEState) -> tuple[int, int]:
+    def _move_batches(self, state: FoodCrisisState) -> tuple[int, int]:
         contaminated_shipments = 0
         prevented_shipments = 0
         for batch in state.batch_records.values():
@@ -598,7 +565,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         state.contaminated_shipments += contaminated_shipments
         return contaminated_shipments, prevented_shipments
 
-    def _deliver_retail_exposure(self, state: IRCEState) -> int:
+    def _deliver_retail_exposure(self, state: FoodCrisisState) -> int:
         new_cases = 0
         for batch in state.batch_records.values():
             if batch.recalled or batch.delivered:
@@ -628,7 +595,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             )
         return new_cases
 
-    def _release_due_lab_results(self, state: IRCEState) -> dict[str, str]:
+    def _release_due_lab_results(self, state: FoodCrisisState) -> dict[str, str]:
         released: dict[str, str] = {}
         remaining: list[PendingInspection] = []
         for pending in state.pending_inspections:
@@ -640,7 +607,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         state.lab_results.update(released)
         return released
 
-    def _release_due_illness_reports(self, state: IRCEState) -> list[IllnessReport]:
+    def _release_due_illness_reports(self, state: FoodCrisisState) -> list[IllnessReport]:
         released: list[IllnessReport] = []
         remaining: list[IllnessReport] = []
         for report in state.pending_illness_reports:
@@ -652,12 +619,12 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         state.illness_reports = (state.illness_reports + released)[-6:]
         return released
 
-    def _tick_alerts(self, state: IRCEState) -> None:
+    def _tick_alerts(self, state: FoodCrisisState) -> None:
         for node_id, timer in list(state.alert_timers.items()):
             if timer > 0:
                 state.alert_timers[node_id] = timer - 1
 
-    def _refresh_nodes(self, state: IRCEState) -> None:
+    def _refresh_nodes(self, state: FoodCrisisState) -> None:
         sensor_readings = self._generate_sensor_readings(state)
         for node_id, node in state.nodes.items():
             node.sensor_reading = sensor_readings[node_id]
@@ -670,7 +637,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
                 and not state.batch_records[batch_id].delivered
             ]
 
-    def _generate_sensor_readings(self, state: IRCEState) -> dict[str, float]:
+    def _generate_sensor_readings(self, state: FoodCrisisState) -> dict[str, float]:
         sensor_readings: dict[str, float] = {}
         for node_id in self.task_config.node_ids:
             noise = self._rng.gauss(0.0, self.task_config.sensor_noise_std)
@@ -679,13 +646,13 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
                 reading += 0.45
             sensor_readings[node_id] = round(min(1.0, max(0.0, reading)), 3)
         return sensor_readings
-    def _contamination_spreading(self, state: IRCEState) -> bool:
+    def _contamination_spreading(self, state: FoodCrisisState) -> bool:
         return any(
             batch.contaminated and not batch.recalled and not batch.delivered
             for batch in state.batch_records.values()
         )
 
-    def _active_uncontained_sources(self, state: IRCEState) -> int:
+    def _active_uncontained_sources(self, state: FoodCrisisState) -> int:
         return sum(
             1
             for source in state.source_nodes
@@ -693,13 +660,13 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             and state.true_contamination.get(source, 0.0) >= self.task_config.contamination_threshold
         )
 
-    def _check_done(self, state: IRCEState) -> bool:
+    def _check_done(self, state: FoodCrisisState) -> bool:
         contained = self._is_contained(state)
         if contained and state.contained_at_step is None:
             state.contained_at_step = state.timestep
         return contained or state.timestep >= self.task_config.max_steps or state.recall_budget <= 0
 
-    def _is_contained(self, state: IRCEState) -> bool:
+    def _is_contained(self, state: FoodCrisisState) -> bool:
         all_sources_quarantined = all(state.quarantine_status.get(source, False) for source in state.source_nodes)
         active_contaminated_batches = any(
             batch.contaminated and not batch.recalled and not batch.delivered
@@ -733,7 +700,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         reward: float,
         done: bool,
         note: str,
-    ) -> IRCEObservation:
+    ) -> FoodCrisisObservation:
         state = self._state
         sensor_readings = {node_id: node.sensor_reading for node_id, node in state.nodes.items()}
         compat_error_type = self._derive_compat_error_type(state, sensor_readings)
@@ -743,7 +710,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             state.compat_same_error_count = 0
             state.compat_error_type = compat_error_type
 
-        observation = IRCEObservation(
+        observation = FoodCrisisObservation(
             timestep=state.timestep,
             nodes=list(state.nodes.values()),
             sensor_readings=sensor_readings,
@@ -773,7 +740,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         observation.status_summary = observation.natural_language_summary
         return self._apply_transform(observation)
 
-    def _derive_compat_error_type(self, state: IRCEState, sensor_readings: dict[str, float]) -> str:
+    def _derive_compat_error_type(self, state: FoodCrisisState, sensor_readings: dict[str, float]) -> str:
         max_sensor = max(sensor_readings.values()) if sensor_readings else 0.0
         if state.lab_budget <= 0 or state.recall_budget < 10:
             return "RATE_LIMIT"
@@ -781,18 +748,18 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             return "HARD"
         return "TRANSIENT"
 
-    def _normalized_budget_remaining(self, state: IRCEState) -> float:
+    def _normalized_budget_remaining(self, state: FoodCrisisState) -> float:
         lab_ratio = state.lab_budget / max(1, self.task_config.lab_budget)
         recall_ratio = state.recall_budget / max(1, self.task_config.recall_budget)
         return round(max(0.0, min(1.0, (lab_ratio + recall_ratio + state.public_trust) / 3.0)), 3)
 
-    def _pending_lab_cooldown(self, state: IRCEState) -> int:
+    def _pending_lab_cooldown(self, state: FoodCrisisState) -> int:
         if not state.pending_inspections:
             return 0
         soonest_due = min(pending.due_timestep for pending in state.pending_inspections)
         return max(0, soonest_due - state.timestep)
 
-    def _progress_hint(self, state: IRCEState) -> float:
+    def _progress_hint(self, state: FoodCrisisState) -> float:
         if self._is_contained(state):
             return 1.0
         source_quarantine_ratio = sum(1 for source in state.source_nodes if state.quarantine_status.get(source, False)) / max(1, len(state.source_nodes))
@@ -804,7 +771,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         batch_control_ratio = 1.0 - (active_contaminated / max(1, state.total_contaminated_batches))
         return round(max(0.0, min(1.0, (0.55 * source_quarantine_ratio) + (0.45 * batch_control_ratio))), 3)
 
-    def _build_nl_summary(self, state: IRCEState, note: str) -> str:
+    def _build_nl_summary(self, state: FoodCrisisState, note: str) -> str:
         sensor_pairs = sorted(state.nodes.items(), key=lambda item: item[1].sensor_reading, reverse=True)
         risky_nodes = ", ".join(f"{node_id}={node.sensor_reading:.2f}" for node_id, node in sensor_pairs[:3]) or "none"
         source_candidates = [
@@ -850,6 +817,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             f"Trust level: {state.public_trust:.2f}. "
             f"{note} {hint_text} {false_signal_hint}"
         ).strip()
+
 
     def _edge_key(self, source: str, target: str) -> str:
         return f"{source}->{target}"

@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-if os.getenv("IRCE_STANDALONE") == "1":
+if os.getenv("FOODCRISIS_STANDALONE") == "1":
     class Action(BaseModel):
         pass
 
@@ -22,9 +22,7 @@ else:
     except ImportError:  # pragma: no cover
         from openenv_core.env_server import Action, Observation, State
 
-FOOD_ACTIONS = {"INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT"}
-LEGACY_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
-SUPPORTED_ACTIONS = FOOD_ACTIONS | LEGACY_ACTIONS
+SUPPORTED_ACTIONS = {"INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT"}
 
 
 class NodeState(BaseModel):
@@ -60,7 +58,7 @@ class PendingInspection(BaseModel):
     contaminated: bool = False
 
 
-class IRCEAction(Action):
+class FoodCrisisAction(Action):
     action_type: str = "WAIT"
 
     @field_validator("action_type", mode="before")
@@ -76,12 +74,7 @@ class IRCEAction(Action):
         parts = text.split(" ", 1)
         verb = parts[0].upper().replace("-", "_")
         target = parts[1].strip() if len(parts) > 1 else ""
-        alias_map = {
-            "MODIFY_INPUT": "MODIFY",
-            "SWITCH_TOOL": "SWITCH",
-        }
-        normalized = alias_map.get(verb, verb)
-        return f"{normalized} {target}".strip()
+        return f"{verb} {target}".strip()
 
     @property
     def verb(self) -> str:
@@ -97,7 +90,7 @@ class IRCEAction(Action):
         return self.verb in SUPPORTED_ACTIONS
 
 
-class IRCEObservation(Observation):
+class FoodCrisisObservation(Observation):
     timestep: int = Field(default=0, ge=0)
     nodes: list[NodeState] = Field(default_factory=list)
     sensor_readings: dict[str, float] = Field(default_factory=dict)
@@ -123,7 +116,7 @@ class IRCEObservation(Observation):
     status_summary: str = ""
 
 
-class IRCEState(State):
+class FoodCrisisState(State):
     goal: str = "Protect consumers by tracing contamination through the food network."
     task_name: str = "easy"
     timestep: int = Field(default=0, ge=0)

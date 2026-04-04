@@ -6,15 +6,15 @@ except ImportError:  # pragma: no cover
     from openenv_core.env_server import create_fastapi_app
 
 try:
-    from irce.environment import IRCEEnv
-    from irce.models import IRCEAction, IRCEObservation
+    from irce.environment import FoodCrisisEnv
+    from irce.models import FoodCrisisAction, FoodCrisisObservation
 except ImportError:  # pragma: no cover
-    from environment import IRCEEnv
-    from models import IRCEAction, IRCEObservation
+    from environment import FoodCrisisEnv
+    from models import FoodCrisisAction, FoodCrisisObservation
 
 
-def create_environment() -> IRCEEnv:
-    return IRCEEnv()
+def create_environment() -> FoodCrisisEnv:
+    return FoodCrisisEnv()
 
 
-app = create_fastapi_app(create_environment, IRCEAction, IRCEObservation)
+app = create_fastapi_app(create_environment, FoodCrisisAction, FoodCrisisObservation)

@@ -2,7 +2,7 @@
 Organizer-compliant inference entry point for FoodCrisisEnv.
 
 Pure LLM strategy — every action decision goes through the language model.
-Rate limiting: 2.5s sleep between LLM calls keeps us inside Groq free tier (30 req/min).
+Rate limiting: 2.2s sleep between LLM calls achieves ~27 calls/min (safe under Groq 30 req/min limit).
 On 429 errors: backs off 65s then retries once before defaulting to WAIT.
 """
 from __future__ import annotations
@@ -27,16 +27,16 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-os.environ.setdefault("IRCE_STANDALONE", "1")
+os.environ.setdefault("FOODCRISIS_STANDALONE", "1")
 
-from irce.environment import IRCEEnv
+from irce.environment import FoodCrisisEnv
 from irce.grading import grade_episode
-from irce.models import IRCEAction, IRCEObservation
+from irce.models import FoodCrisisAction, FoodCrisisObservation
 from irce.tasks import TaskConfig, build_task_registry
 
 BENCHMARK = "food-crisis-env"
-DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
-DEFAULT_MODEL_NAME = "openai/gpt-oss-20b:cheapest"
+DEFAULT_API_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_MODEL_NAME ="llama-3.1-8b-instant"
 ACTION_PATTERN = re.compile(r"^(INSPECT|QUARANTINE|LIFT|RECALL|ALERT|WAIT)(?:\s+(.+))?$", re.IGNORECASE)
 TEMPERATURE = 0.0
 MAX_TOKENS = 32
@@ -44,8 +44,9 @@ REQUEST_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
 SUCCESS_SCORE_THRESHOLD = float(os.getenv("SUCCESS_SCORE_THRESHOLD", "0.1"))
 MAX_CONSECUTIVE_UNUSABLE_STEPS = int(os.getenv("MAX_CONSECUTIVE_UNUSABLE_STEPS", "5"))
 
-# 2.5s between calls = 24 calls/min, safely under Groq free tier (30 req/min)
-LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "2.5"))
+# Rate limiting: 2.2s between calls = ~27 calls/min, optimized for Groq free tier (30 req/min limit)
+# Provides balanced throughput (~27 calls/min) with comfortable safety margin under 30 req/min.
+LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "2.2"))
 
 SYSTEM_PROMPT = """You are a food safety incident responder controlling FoodCrisisEnv.
 Your job: contain contamination quickly while preserving public trust and limited budgets.
@@ -134,7 +135,7 @@ MODEL_ACCESS_STATE = ModelAccessState()
 
 class LocalEnvRunner:
     def __init__(self, task_id: int, seed: int) -> None:
-        self._env = IRCEEnv(task_id=task_id, seed=seed)
+        self._env = FoodCrisisEnv(task_id=task_id, seed=seed)
         self.task_id = task_id
         self.seed = seed
 
@@ -142,11 +143,11 @@ class LocalEnvRunner:
     def episode_log(self) -> list[dict[str, Any]]:
         return self._env.episode_log
 
-    def reset(self) -> StepResult[IRCEObservation]:
+    def reset(self) -> StepResult[FoodCrisisObservation]:
         observation = self._env.reset(seed=self.seed, task_id=self.task_id)
         return StepResult(observation=observation, reward=observation.reward, done=observation.done)
 
-    def step(self, action: IRCEAction) -> StepResult[IRCEObservation]:
+    def step(self, action: FoodCrisisAction) -> StepResult[FoodCrisisObservation]:
         observation = self._env.step(action)
         return StepResult(observation=observation, reward=observation.reward, done=observation.done)
 
@@ -162,7 +163,7 @@ def normalize_single_line(value: str) -> str:
     return " ".join(str(value).split())
 
 
-def visible_batch_ids(observation: IRCEObservation) -> list[str]:
+def visible_batch_ids(observation: FoodCrisisObservation) -> list[str]:
     batch_ids: list[str] = []
     seen: set[str] = set()
     for node in observation.nodes:
@@ -174,11 +175,11 @@ def visible_batch_ids(observation: IRCEObservation) -> list[str]:
     return batch_ids
 
 
-def available_node_ids(observation: IRCEObservation) -> list[str]:
+def available_node_ids(observation: FoodCrisisObservation) -> list[str]:
     return [node.node_id for node in observation.nodes]
 
 
-def extract_pending_inspection_nodes(observation: IRCEObservation) -> list[str]:
+def extract_pending_inspection_nodes(observation: FoodCrisisObservation) -> list[str]:
     summary = observation.natural_language_summary or ""
     match = re.search(r"Pending lab tests:\s*([^.]*)\.", summary)
     if match is None:
@@ -196,19 +197,19 @@ def extract_pending_inspection_nodes(observation: IRCEObservation) -> list[str]:
     return pending_nodes
 
 
-def inspected_or_pending_nodes(observation: IRCEObservation) -> list[str]:
+def inspected_or_pending_nodes(observation: FoodCrisisObservation) -> list[str]:
     combined = {node_id.lower() for node_id in observation.lab_results}
     combined.update(extract_pending_inspection_nodes(observation))
     return sorted(combined)
 
 
-def uninspected_nodes(observation: IRCEObservation) -> list[str]:
+def uninspected_nodes(observation: FoodCrisisObservation) -> list[str]:
     all_nodes = {n.lower() for n in available_node_ids(observation)}
     already_done = set(inspected_or_pending_nodes(observation))
     return sorted(all_nodes - already_done)
 
 
-def build_user_prompt(step: int, observation: IRCEObservation, history: list[str]) -> str:
+def build_user_prompt(step: int, observation: FoodCrisisObservation, history: list[str]) -> str:
     recent_history = "\n".join(history[-4:]) if history else "none"
     illness_payload = [report.model_dump() for report in observation.illness_reports]
     node_ids = ", ".join(available_node_ids(observation)) or "none"
@@ -356,7 +357,7 @@ def candidate_texts_from_response(response_text: str) -> list[str]:
     return candidates
 
 
-def parse_candidate_action(candidate: str, observation: IRCEObservation) -> str | None:
+def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -> str | None:
     first_line = strip_outer_quotes(candidate.splitlines()[0].strip())
     text = normalize_single_line(first_line)
     if not text:
@@ -398,7 +399,7 @@ def parse_candidate_action(candidate: str, observation: IRCEObservation) -> str 
     return None
 
 
-def parse_model_action(response_text: str, observation: IRCEObservation) -> str | None:
+def parse_model_action(response_text: str, observation: FoodCrisisObservation) -> str | None:
     for candidate in candidate_texts_from_response(response_text):
         parsed = parse_candidate_action(candidate, observation)
         if parsed:
@@ -406,7 +407,7 @@ def parse_model_action(response_text: str, observation: IRCEObservation) -> str 
     return None
 
 
-def apply_action_guard(action_str: str, observation: IRCEObservation) -> str:
+def apply_action_guard(action_str: str, observation: FoodCrisisObservation) -> str:
     """Block actions that would be wasted or cause errors in the environment."""
     parts = action_str.split(" ", 1)
     verb = parts[0].upper()
@@ -452,7 +453,7 @@ def request_action(
     *,
     client: Any,
     model_name: str,
-    observation: IRCEObservation,
+    observation: FoodCrisisObservation,
     history: list[str],
     step: int,
     access_state: ModelAccessState,
@@ -539,9 +540,6 @@ def request_action(
     return "WAIT"
 
 
-# ---------------------------------------------------------------------------
-# Logging — matches sample inference script format exactly
-# ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
     print(
@@ -567,7 +565,7 @@ def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> No
     )
 
 
-def extract_step_error(observation: IRCEObservation) -> str | None:
+def extract_step_error(observation: FoodCrisisObservation) -> str | None:
     return "action_error" if observation.last_action_error else None
 
 
@@ -615,7 +613,7 @@ def run_task(task_id: int, task_config: TaskConfig, seed: int, client: Any, mode
                 f"lab_budget={observation.lab_budget} | trust={observation.public_trust:.2f}"
             )
 
-            result = env.step(IRCEAction(action_type=action_str))
+            result = env.step(FoodCrisisAction(action_type=action_str))
             observation = result.observation
             reward = float(result.reward or 0.0)
             done = bool(result.done)

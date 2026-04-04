@@ -87,12 +87,13 @@ Primary observation fields:
 | `illness_reports` | Delayed retailer reports released so far |
 | `quarantine_status` | Current quarantine state per node |
 | `lab_results` | Exact contamination verdicts for completed inspections |
+| `traced_batches` | Supply chain paths for batches that have been traced, mapping batch IDs to their origin and path |
 | `lab_budget` | Remaining lab tests |
 | `recall_budget` | Remaining recall budget |
 | `public_trust` | Starts near 1.0 and drops when the agent overreacts |
 | `natural_language_summary` | Judge-friendly and LLM-friendly summary of the current situation |
 
-The summary is the intended decision surface for language models. It highlights the top sensor spikes, recent illness reports, quarantine state, lab updates, pending tests, remaining budgets, and public trust in one short paragraph.
+The summary is the intended decision surface for language models. It highlights the top sensor spikes, recent illness reports, quarantine state, lab updates, traced batch paths, pending tests, remaining budgets, and public trust in one short paragraph.
 
 ## Action space
 
@@ -105,9 +106,21 @@ The environment accepts exact string actions:
 | `LIFT <node_id>` | Remove quarantine and restore flow |
 | `RECALL <batch_id>` | Remove a batch from the supply chain at recall-budget cost |
 | `ALERT <node_id>` | Issue a retailer warning that slows exposure but permanently reduces trust |
+| `TRACE <batch_id>` | Trace a batch backward through the supply chain to identify its source and path |
 | `WAIT` | Take no direct action and let the system evolve one step |
 
 These are intentionally minimal. The difficulty comes from hidden state and delayed evidence, not from a large action vocabulary.
+
+### About TRACE
+
+`TRACE` is a low-cost information action that models real food-traceability workflows. When called on a batch, it returns the complete path the batch took through the supply chain and identifies the origin node. This allows agents to reason about supply structure and backwards causality without expensive lab tests.
+
+- Cost: minimal (-0.1 reward)
+- Benefit: eliminates uncertainty about batch origin and propagation path
+- Use case: disambiguate between false signals and real source contamination
+- Real-world mapping: corresponds to supplier records and batch traceability data under FSMA 204
+
+TRACE results are stored in `traced_batches` and appear in the observation and `natural_language_summary`.
 
 ## Hidden dynamics
 
@@ -125,15 +138,31 @@ The agent must therefore learn containment, tracing, and triage under partial ob
 
 ## Reward signal
 
-The environment gives dense step-level reward, not just an end score.
+The environment gives dense step-level reward, not just an end score. Rewards are strategically designed to teach outbreak *origin-finding* rather than just symptom-chasing.
 
-- penalizes contaminated shipments moving downstream
-- penalizes newly exposed illness cases
-- rewards correct quarantine decisions
-- penalizes quarantining clean nodes
-- rewards useful inspection
-- penalizes wasted actions
-- adds time pressure while contamination is still spreading
+### Quarantine rewards (differentiated by contamination source):
+- **Source quarantine**: +4.0 — Direct containment at origin
+- **Non-source contaminated quarantine**: +2.0 — Downstream containment, less optimal
+- **Wrong quarantine** (quarantining clean nodes): -2.0 — Precision penalty
+
+### Recall rewards (differentiated by batch status):
+- **Correct contaminated recall**: +1.5 — Removing actual contaminated batches
+- **Wrong clean recall**: -1.0 — Penalty for recalling uncontaminated product
+
+### Containment rewards:
+- **Prevented contaminated shipments** (blocked by quarantine): +0.5 each — Direct signal for effective containment before illness arrives
+
+### Operational penalties:
+- **TRACE cost**: -0.1 — Small cost to encourage judicious information gathering
+- **Urgency penalty**: -0.15 × active_uncontained_sources — Increases pressure as contamination spreads
+
+### Why this structure improves learning:
+
+The reward now explicitly distinguishes finding the *outbreak origin* from simply chasing downstream symptoms. Quarantining a source farm (+4.0) yields twice the reward of quarantining a downstream processor (+2.0), so the agent gets a strong signal to trace backward rather than only reacting to highest sensor readings.
+
+Recall is now symmetric: agents get positive feedback for removing contaminated product instead of only paying cost for recalls. This encourages disciplined, evidence-based recall decisions.
+
+The prevented-shipment reward gives the agent a direct signal before illness damages arrive, which is critical in a delayed-observation environment — agents learn that *early containment* prevents both contamination spread and delayed loss-of-life penalties.
 
 This reward is meant to guide learning during an episode. Final leaderboard ranking is driven by the grader, not by raw summed reward alone.
 
@@ -258,12 +287,13 @@ You are a food safety incident responder controlling FoodCrisisEnv.
 Your job is to contain contamination quickly while preserving public trust and limited budgets.
 
 Priorities:
-1. Confirm likely source nodes with INSPECT when uncertainty is high.
-2. QUARANTINE confirmed contaminated nodes before more batches move downstream.
-3. RECALL contaminated or highly exposed batches when they are already in the chain.
-4. Use ALERT sparingly. It buys time but permanently reduces trust.
-5. LIFT quarantine when a node is confirmed clean.
-6. WAIT only when it is strategically useful, such as waiting for a pending lab result.
+1. TRACE suspicious or already-exposed batches to understand upstream source and propagation path.
+2. Confirm likely source nodes with INSPECT when uncertainty is high.
+3. QUARANTINE confirmed contaminated source nodes aggressively — finding the origin is worth far more than downstream reaction.
+4. RECALL contaminated or highly exposed batches when they are already downstream in the chain.
+5. Use ALERT sparingly. It buys time but permanently reduces trust.
+6. LIFT quarantine when a node is confirmed clean to restore supply chain and build trust.
+7. WAIT only when it is strategically useful, such as waiting for a pending lab result or trace confirmation.
 
 Respond with exactly one valid action string and nothing else.
 Valid formats:
@@ -272,6 +302,7 @@ Valid formats:
 - LIFT <node_id>
 - RECALL <batch_id>
 - ALERT <node_id>
+- TRACE <batch_id>
 - WAIT
 ```
 
@@ -288,6 +319,7 @@ Structured fields:
 - public_trust: {public_trust}
 - lab_results: {lab_results}
 - illness_reports: {illness_reports}
+- traced_batches: {traced_batches}
 
 Return exactly one action string.
 ```
@@ -295,8 +327,9 @@ Return exactly one action string.
 Strict output examples:
 
 ```text
+TRACE farm_b_batch_001
 INSPECT farm_b
-QUARANTINE processing_p1
+QUARANTINE farm_b
 RECALL farm_b_batch_004
 ALERT retailer_r2
 WAIT

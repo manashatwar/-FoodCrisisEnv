@@ -1,0 +1,165 @@
+RAW_MODEL_OUTPUT: WAIT
+STEP 1 | final_action=WAIT | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 2 | final_action=WAIT | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: RECALL farm_b_batch_004
+STEP 3 | final_action=RECALL farm_b_batch_004 | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT farm_b
+STEP 4 | final_action=INSPECT farm_b | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 5 | final_action=WAIT | lab_budget=9 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+STEP 6 | final_action=QUARANTINE farm_b | lab_budget=9 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 1 | final_action=WAIT | lab_budget=6 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT farm_b
+STEP 2 | final_action=INSPECT farm_b | lab_budget=6 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 3 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+STEP 4 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 5 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 6 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 7 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 8 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 9 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 10 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 11 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 12 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 13 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 14 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 15 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 16 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 17 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 18 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 19 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 20 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 21 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 22 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 23 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 24 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 25 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 26 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 27 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 28 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 29 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: LIFT farm_b
+STEP 30 | final_action=LIFT farm_b | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+STEP 31 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 32 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 33 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 34 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 35 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 36 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 37 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 38 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 39 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 40 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: LIFT farm_b
+STEP 41 | final_action=LIFT farm_b | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+STEP 42 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: LIFT farm_a
+ACTION_GUARD: LIFT farm_a -> WAIT (not quarantined)
+STEP 43 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 44 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 45 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 46 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 47 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 48 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 49 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 50 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 51 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 52 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 53 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 54 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 55 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 56 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 57 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 58 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 59 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
+STEP 60 | final_action=WAIT | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 1 | final_action=WAIT | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 2 | final_action=WAIT | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 3 | final_action=WAIT | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT farm_b
+STEP 4 | final_action=INSPECT farm_b | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 5 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: QUARANTINE farm_b
+STEP 6 | final_action=QUARANTINE farm_b | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 7 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 8 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 9 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 10 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 11 | final_action=WAIT | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: WAIT
+STEP 12 | final_action=WAIT | lab_budget=3 | trust=1.00

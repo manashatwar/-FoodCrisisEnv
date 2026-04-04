@@ -44,8 +44,7 @@ For current regulatory context, FDA's Food Traceability Rule originally targeted
 
 Relevant FDA references:
 
-- https://www.fda.gov/food/food-safety-modernization-act-fsma/fsma-rules-guidance-industry
-- https://www.fda.gov/food/food-safety-modernization-act-fsma/food-traceability-final-rule
+- **FSMA Rules & Guidance:** https://www.fda.gov/food/food-safety-modernization-act-fsma/fsma-rules-guidance-industry
 
 ## Environment overview
 
@@ -255,7 +254,7 @@ How an LLM or learned policy can do better:
 - use TRACE to identify batch origin and supply chain path before committing to expensive quarantines
 - combine illness reports with upstream graph structure and traced paths
 - distinguish suspicious-but-unconfirmed nodes from confirmed sources
-- *prioritize quarantining confirmed sources* over reacting to high sensors, capturing the +4.0 reward signal
+- _prioritize quarantining confirmed sources_ over reacting to high sensors, capturing the +4.0 reward signal
 - spend lab budget where ambiguity is highest instead of where the sensor is merely largest
 - preserve trust by avoiding unnecessary alerts and quarantines on nodes confirmed clean by TRACE
 

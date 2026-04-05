@@ -37,7 +37,7 @@ from irce.tasks import TaskConfig, build_task_registry
 BENCHMARK = "food-crisis-env"
 DEFAULT_API_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_MODEL_NAME ="llama-3.1-8b-instant"
-ACTION_PATTERN = re.compile(r"^(INSPECT|QUARANTINE|LIFT|RECALL|ALERT|WAIT)(?:\s+(.+))?$", re.IGNORECASE)
+ACTION_PATTERN = re.compile(r"^(INSPECT|QUARANTINE|LIFT|RECALL|TRACE|ALERT|WAIT)(?:\s+(.+))?$", re.IGNORECASE)
 TEMPERATURE = 0.0
 MAX_TOKENS = 32
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
@@ -408,7 +408,7 @@ def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -
     match = ACTION_PATTERN.fullmatch(text)
     if match is None:
         search_match = re.search(
-            r"\b(INSPECT|QUARANTINE|LIFT|RECALL|ALERT|WAIT)\b(?:\s+([A-Za-z0-9_\-]+))?",
+            r"\b(INSPECT|QUARANTINE|LIFT|RECALL|TRACE|ALERT|WAIT)\b(?:\s+([A-Za-z0-9_\-]+))?",
             text, re.IGNORECASE,
         )
         if search_match is None:
@@ -435,8 +435,8 @@ def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -
     if verb == "ALERT":
         node = node_lookup.get(normalized_target)
         return f"ALERT {normalized_target}" if (node and node.node_type == "retailer") else None
-    if verb == "RECALL":
-        return f"RECALL {normalized_target}" if normalized_target in batch_lookup else None
+    if verb in {"RECALL", "TRACE"}:
+        return f"{verb} {normalized_target}" if normalized_target in batch_lookup else None
 
     return None
 

@@ -1,165 +1,310 @@
-RAW_MODEL_OUTPUT: WAIT
-STEP 1 | final_action=WAIT | lab_budget=10 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 2 | final_action=WAIT | lab_budget=10 | trust=1.00
-RAW_MODEL_OUTPUT: RECALL farm_b_batch_004
-STEP 3 | final_action=RECALL farm_b_batch_004 | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_006
+STEP 1 | final_action=TRACE farm_b_batch_006 | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_004
+STEP 2 | final_action=TRACE farm_b_batch_004 | lab_budget=10 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p1
+STEP 3 | final_action=INSPECT processing_p1 | lab_budget=10 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_a_batch_001
+STEP 4 | final_action=TRACE farm_a_batch_001 | lab_budget=9 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE processing_p1
+STEP 5 | final_action=QUARANTINE processing_p1 | lab_budget=9 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_a_batch_003
+STEP 6 | final_action=TRACE farm_a_batch_003 | lab_budget=9 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_a_batch_002
+STEP 7 | final_action=TRACE farm_a_batch_002 | lab_budget=9 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT warehouse_w1
+STEP 8 | final_action=INSPECT warehouse_w1 | lab_budget=9 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 9 | final_action=WAIT | lab_budget=8 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT retailer_r2
+STEP 10 | final_action=INSPECT retailer_r2 | lab_budget=8 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 11 | final_action=WAIT | lab_budget=7 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE retailer_r2
+STEP 12 | final_action=QUARANTINE retailer_r2 | lab_budget=7 | trust=1.00
+DETERMINISTIC_FALLBACK: RECALL farm_a_batch_002
+STEP 13 | final_action=RECALL farm_a_batch_002 | lab_budget=7 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT retailer_r1
+STEP 14 | final_action=INSPECT retailer_r1 | lab_budget=7 | trust=0.95
+DETERMINISTIC_FALLBACK: WAIT
+STEP 15 | final_action=WAIT | lab_budget=6 | trust=0.95
+DETERMINISTIC_FALLBACK: QUARANTINE retailer_r1
+STEP 16 | final_action=QUARANTINE retailer_r1 | lab_budget=6 | trust=0.95
+DETERMINISTIC_FALLBACK: RECALL farm_a_batch_001
+STEP 17 | final_action=RECALL farm_a_batch_001 | lab_budget=6 | trust=0.95
+DETERMINISTIC_FALLBACK: RECALL farm_a_batch_003
+STEP 18 | final_action=RECALL farm_a_batch_003 | lab_budget=6 | trust=0.90
+RAW_MODEL_OUTPUT: INSPECT farm_a
+STEP 19 | final_action=INSPECT farm_a | lab_budget=6 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 20 | final_action=WAIT | lab_budget=5 | trust=0.85
 RAW_MODEL_OUTPUT: INSPECT farm_b
-STEP 4 | final_action=INSPECT farm_b | lab_budget=10 | trust=1.00
+STEP 21 | final_action=INSPECT farm_b | lab_budget=5 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 22 | final_action=WAIT | lab_budget=4 | trust=0.85
+DETERMINISTIC_FALLBACK: QUARANTINE farm_b
+STEP 23 | final_action=QUARANTINE farm_b | lab_budget=4 | trust=0.85
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_005
+STEP 1 | final_action=TRACE farm_b_batch_005 | lab_budget=6 | trust=1.00
 RAW_MODEL_OUTPUT: WAIT
-STEP 5 | final_action=WAIT | lab_budget=9 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-STEP 6 | final_action=QUARANTINE farm_b | lab_budget=9 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 1 | final_action=WAIT | lab_budget=6 | trust=1.00
-RAW_MODEL_OUTPUT: INSPECT farm_b
-STEP 2 | final_action=INSPECT farm_b | lab_budget=6 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 3 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-STEP 4 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 5 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 6 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 7 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
+STEP 2 | final_action=WAIT | lab_budget=6 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_001
+STEP 3 | final_action=TRACE farm_a_batch_001 | lab_budget=6 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_007
+STEP 4 | final_action=TRACE farm_c_batch_007 | lab_budget=6 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_008
+STEP 5 | final_action=TRACE farm_c_batch_008 | lab_budget=6 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_009
+STEP 6 | final_action=TRACE farm_c_batch_009 | lab_budget=6 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT warehouse_w2
+STEP 7 | final_action=INSPECT warehouse_w2 | lab_budget=6 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
 STEP 8 | final_action=WAIT | lab_budget=5 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE warehouse_w2
+STEP 9 | final_action=QUARANTINE warehouse_w2 | lab_budget=5 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT warehouse_w1
+STEP 10 | final_action=INSPECT warehouse_w1 | lab_budget=5 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 11 | final_action=WAIT | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE warehouse_w1
+STEP 12 | final_action=QUARANTINE warehouse_w1 | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT farm_a
+STEP 13 | final_action=INSPECT farm_a | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 14 | final_action=WAIT | lab_budget=3 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE farm_a
+STEP 15 | final_action=QUARANTINE farm_a | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p1
+STEP 16 | final_action=INSPECT processing_p1 | lab_budget=3 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 17 | final_action=WAIT | lab_budget=2 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE processing_p1
+STEP 18 | final_action=QUARANTINE processing_p1 | lab_budget=2 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p2
+STEP 19 | final_action=INSPECT processing_p2 | lab_budget=2 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 20 | final_action=WAIT | lab_budget=1 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE processing_p2
+STEP 21 | final_action=QUARANTINE processing_p2 | lab_budget=1 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT retailer_r5
+STEP 22 | final_action=INSPECT retailer_r5 | lab_budget=1 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 23 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE retailer_r5
+STEP 24 | final_action=QUARANTINE retailer_r5 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: RECALL farm_c_batch_007
+STEP 25 | final_action=RECALL farm_c_batch_007 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: RECALL farm_c_batch_008
+STEP 26 | final_action=RECALL farm_c_batch_008 | lab_budget=0 | trust=0.95
+DETERMINISTIC_FALLBACK: RECALL farm_c_batch_009
+STEP 27 | final_action=RECALL farm_c_batch_009 | lab_budget=0 | trust=0.90
+DETERMINISTIC_FALLBACK: WAIT
+STEP 28 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 29 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 30 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 31 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 32 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 33 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 34 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 35 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 36 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 37 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 38 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 39 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 40 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 41 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 42 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 43 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 44 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 45 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 46 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 47 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 48 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 49 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 50 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 51 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 52 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 53 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 54 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 55 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 56 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 57 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 58 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 59 | final_action=WAIT | lab_budget=0 | trust=0.85
+DETERMINISTIC_FALLBACK: WAIT
+STEP 60 | final_action=WAIT | lab_budget=0 | trust=0.85
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_001
+STEP 1 | final_action=TRACE farm_a_batch_001 | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_002
+STEP 2 | final_action=TRACE farm_a_batch_002 | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_003
+STEP 3 | final_action=TRACE farm_a_batch_003 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_012
+STEP 4 | final_action=TRACE farm_c_batch_012 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_009
+STEP 5 | final_action=TRACE farm_c_batch_009 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_011
+STEP 6 | final_action=TRACE farm_c_batch_011 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_d_batch_016
+STEP 7 | final_action=TRACE farm_d_batch_016 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_c_batch_010
+STEP 8 | final_action=TRACE farm_c_batch_010 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_d_batch_013
+STEP 9 | final_action=TRACE farm_d_batch_013 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_d_batch_014
+STEP 10 | final_action=TRACE farm_d_batch_014 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_d_batch_015
+STEP 11 | final_action=TRACE farm_d_batch_015 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_e_batch_017
+STEP 12 | final_action=TRACE farm_e_batch_017 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_e_batch_018
+STEP 13 | final_action=TRACE farm_e_batch_018 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_e_batch_019
+STEP 14 | final_action=TRACE farm_e_batch_019 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: TRACE farm_e_batch_020
+STEP 15 | final_action=TRACE farm_e_batch_020 | lab_budget=4 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p1
+STEP 16 | final_action=INSPECT processing_p1 | lab_budget=4 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 17 | final_action=WAIT | lab_budget=3 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE processing_p1
+STEP 18 | final_action=QUARANTINE processing_p1 | lab_budget=3 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p2
+STEP 19 | final_action=INSPECT processing_p2 | lab_budget=3 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 20 | final_action=WAIT | lab_budget=2 | trust=1.00
+DETERMINISTIC_FALLBACK: QUARANTINE processing_p2
+STEP 21 | final_action=QUARANTINE processing_p2 | lab_budget=2 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_023
+STEP 22 | final_action=TRACE farm_a_batch_023 | lab_budget=2 | trust=1.00
 RAW_MODEL_OUTPUT: WAIT
-STEP 9 | final_action=WAIT | lab_budget=5 | trust=1.00
+STEP 23 | final_action=WAIT | lab_budget=2 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_024
+STEP 24 | final_action=TRACE farm_b_batch_024 | lab_budget=2 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p3
+STEP 25 | final_action=INSPECT processing_p3 | lab_budget=2 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 26 | final_action=WAIT | lab_budget=1 | trust=1.00
+RAW_MODEL_OUTPUT: INSPECT processing_p4
+STEP 27 | final_action=INSPECT processing_p4 | lab_budget=1 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 28 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 29 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 30 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_025
+STEP 31 | final_action=TRACE farm_a_batch_025 | lab_budget=0 | trust=1.00
 RAW_MODEL_OUTPUT: WAIT
-STEP 10 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 11 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 12 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 13 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 14 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 15 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 16 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 17 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 18 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 19 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 20 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 21 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 22 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 23 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 24 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 25 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 26 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 27 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 28 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 29 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: LIFT farm_b
-STEP 30 | final_action=LIFT farm_b | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-STEP 31 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 32 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 33 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 34 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 35 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 36 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 37 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 38 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 39 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 40 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: LIFT farm_b
-STEP 41 | final_action=LIFT farm_b | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-STEP 42 | final_action=QUARANTINE farm_b | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: LIFT farm_a
-ACTION_GUARD: LIFT farm_a -> WAIT (not quarantined)
-STEP 43 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 44 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 45 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 46 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 47 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 48 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 49 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 50 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 51 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 52 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 53 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 54 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 55 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 56 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 57 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 58 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 59 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-ACTION_GUARD: QUARANTINE farm_b -> WAIT (already quarantined)
-STEP 60 | final_action=WAIT | lab_budget=5 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 1 | final_action=WAIT | lab_budget=4 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 2 | final_action=WAIT | lab_budget=4 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 3 | final_action=WAIT | lab_budget=4 | trust=1.00
-RAW_MODEL_OUTPUT: INSPECT farm_b
-STEP 4 | final_action=INSPECT farm_b | lab_budget=4 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 5 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: QUARANTINE farm_b
-STEP 6 | final_action=QUARANTINE farm_b | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 7 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 8 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 9 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 10 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 11 | final_action=WAIT | lab_budget=3 | trust=1.00
-RAW_MODEL_OUTPUT: WAIT
-STEP 12 | final_action=WAIT | lab_budget=3 | trust=1.00
+STEP 32 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_026
+STEP 33 | final_action=TRACE farm_b_batch_026 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 34 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 35 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 36 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 37 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 38 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 39 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 40 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_028
+STEP 41 | final_action=TRACE farm_b_batch_028 | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_027
+STEP 42 | final_action=TRACE farm_a_batch_027 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 43 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 44 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 45 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 46 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 47 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 48 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 49 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 50 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_030
+STEP 51 | final_action=TRACE farm_b_batch_030 | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_029
+STEP 52 | final_action=TRACE farm_a_batch_029 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 53 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 54 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 55 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 56 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 57 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 58 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 59 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 60 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_032
+STEP 61 | final_action=TRACE farm_b_batch_032 | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_031
+STEP 62 | final_action=TRACE farm_a_batch_031 | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 63 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 64 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 65 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 66 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 67 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 68 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 69 | final_action=WAIT | lab_budget=0 | trust=1.00
+DETERMINISTIC_FALLBACK: WAIT
+STEP 70 | final_action=WAIT | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_b_batch_034
+STEP 71 | final_action=TRACE farm_b_batch_034 | lab_budget=0 | trust=1.00
+RAW_MODEL_OUTPUT: TRACE farm_a_batch_033
+STEP 72 | final_action=TRACE farm_a_batch_033 | lab_budget=0 | trust=1.00

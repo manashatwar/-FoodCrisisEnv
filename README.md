@@ -183,11 +183,11 @@ Task-specific weights shift the emphasis from pure containment on easy episodes 
 
 ## Task suite
 
-| Task         | Description                                                                    |  Noise | Illness delay | Lab budget | Recall budget | Max steps |
-| ------------ | ------------------------------------------------------------------------------ | -----: | ------------: | ---------: | ------------: | --------: |
-| `1 - easy`   | Single source, low noise, fast reports, generous budgets                       | `0.05` |           `1` |       `10` |         `100` |      `48` |
-| `2 - medium` | Multi-source outbreak with delayed reports and tighter budgets                 | `0.15` |           `3` |        `6` |          `60` |      `60` |
-| `3 - hard`   | Adversarial false spikes, delayed reports, re-seeding, and high trust pressure | `0.25` |           `5` |        `4` |          `40` |      `72` |
+| Task | Difficulty | Description | Noise | Illness Delay | Lab Budget | Recall Budget | Max Steps |
+|:----:|:----------:|:-----------|------:|:------:|:------:|:------:|:------:|
+| 1 | Easy | Single source, low noise, fast reports, generous budgets | 0.05 | 1 | 10 | 100 | 48 |
+| 2 | Medium | Multi-source outbreak with delayed reports and tighter budgets | 0.15 | 3 | 6 | 60 | 60 |
+| 3 | Hard | Adversarial false spikes, delayed reports, re-seeding, and high trust pressure | 0.25 | 5 | 4 | 40 | 72 |
 
 Difficulty progression is real:
 

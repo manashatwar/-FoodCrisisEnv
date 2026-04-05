@@ -14,7 +14,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from dotenv import load_dotenv
 
@@ -36,9 +36,9 @@ from irce.tasks import TaskConfig, build_task_registry
 
 BENCHMARK = "food-crisis-env"
 DEFAULT_API_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_MODEL_NAME ="llama-3.1-8b-instant"
+DEFAULT_MODEL_NAME = "llama-3.1-8b-instant"
 ACTION_PATTERN = re.compile(r"^(INSPECT|QUARANTINE|LIFT|RECALL|TRACE|ALERT|WAIT)(?:\s+(.+))?$", re.IGNORECASE)
-TEMPERATURE = 0.0
+TEMPERATURE = 0.5
 MAX_TOKENS = 32
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
 SUCCESS_SCORE_THRESHOLD = float(os.getenv("SUCCESS_SCORE_THRESHOLD", "0.1"))
@@ -46,75 +46,34 @@ MAX_CONSECUTIVE_UNUSABLE_STEPS = int(os.getenv("MAX_CONSECUTIVE_UNUSABLE_STEPS",
 
 # Rate limiting: 2.2s between calls = ~27 calls/min, optimized for Groq free tier (30 req/min limit)
 # Provides balanced throughput (~27 calls/min) with comfortable safety margin under 30 req/min.
-LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "2.2"))
+LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "1.2"))
 
-SYSTEM_PROMPT = """You are a food safety incident responder controlling FoodCrisisEnv.
-Your job: contain contamination quickly while preserving public trust and limited budgets.
+SYSTEM_PROMPT = """You are a food safety investigator. Output exactly one action per step. No explanation. No markdown.
 
-CRITICAL: This is a tracing task. Find the SOURCE farm, not just reactive symptoms.
-- Quarantining source farm: +4.0 reward (high value!)
-- Quarantining downstream contaminated node: +2.0 reward (half the value)
-- Wrong quarantine: -2.0 + trust damage (very costly)
-- TRACE is cheap (-0.1 cost) and reveals source — use it early and often
+Supply chain: farm -> processing -> warehouse -> retailer
+Contamination starts at source farms and spreads downstream each step.
 
-Supply chain flow: farm -> processing -> warehouse -> retailer
-Contamination starts at source(s) and spreads downstream each step. Once at retail, it's exposure and illness cases.
+PRIORITY ORDER — check top to bottom, do the FIRST that applies:
 
-===== DECISION FLOW (Priority Order) =====
+1. LIFT <node>        if lab_results[node]="clean" AND node is quarantined
+2. QUARANTINE <node>  if lab_results[node]="contaminated" AND node NOT quarantined (farms first, +4.0 reward)
+3. INSPECT <node>     if node has high sensor reading AND not in lab_results AND lab_budget > 0
+4. TRACE <batch_id>   if traceable_batch_ids is not empty (pick highest-risk batch; finds source cheaply)
+5. RECALL <batch_id>  if contaminated batch at retailer AND recall_budget >= 10
+6. ALERT <retailer>   if retailer has illness reports AND no quarantine AND recall_budget low (use sparingly)
+7. WAIT               if none of the above apply
 
-At each step, follow this priority exactly:
+HARD RULES — never break:
+- TRACE only batches listed in traceable_batch_ids (untraced batches at nodes)
+- Never TRACE a batch already in traced_batches
+- Never TRACE the same batch as your previous action
+- Never INSPECT a node already in lab_results or pending_inspections
+- Never QUARANTINE an already-quarantined node
+- Never LIFT a node that is not quarantined
+- Never ALERT a non-retailer node
+- RECALL only batches listed in recallable_batch_ids
 
-1. LIFT first: Any node in lab_results="clean" AND currently quarantined? -> LIFT it
-   (Restores supply chain, builds trust, no cost)
-
-2. QUARANTINE second: Any node in lab_results="contaminated" AND NOT quarantined? -> QUARANTINE it
-   (Prioritize farms (source) over processing over warehouse — upstream first)
-   (Farms: +4.0 reward, others: +2.0)
-
-3. TRACE third: visible_batch_ids NOT empty AND (illness_reports present OR high sensor nodes exist)?
-   -> TRACE the most exposed batch (from retailer if possible, else highest risk)
-   (Cheap (-0.1) way to find source origin and path; low risk)
-
-4. INSPECT fourth: Uninspected high-risk nodes AND lab_budget > 0?
-   -> INSPECT the most suspicious node (high sensor, near illness, or upstream of contamination)
-   (Costs lab_budget=1; use selectively on ambiguous nodes)
-
-5. RECALL fifth: Contaminated batch already at retailer/warehouse AND recall_budget >= 10?
-   -> RECALL it (prevents further exposure; +1.5 reward for correct recall)
-   (Only when you're confident batch is contaminated)
-
-6. ALERT sixth: Retailer with active illness AND no quarantine/alert yet AND still waiting?
-   -> ALERT it (buys 3 steps, costs -0.08 trust, but slows exposure)
-   (Use sparingly; only when necessary to delay while waiting for lab results)
-
-7. WAIT: Only when nothing above applies
-   (Safest action when uncertain; minimal cost)
-
-===== CRITICAL RULES — NEVER BREAK THESE =====
-* visible_batch_ids is ground truth. ONLY TRACE/RECALL batches you see here.
-* visible_batch_ids = batches_currently_at_nodes + already_traced_batches
-* Do NOT hallucinate batch IDs. If it's not in visible_batch_ids, don't TRACE it.
-* Do NOT repeat the same action two steps in a row (unless new lab results just landed).
-* Do NOT INSPECT a node already in lab_results or pending inspection.
-* Do NOT QUARANTINE an already-quarantined node.
-* Do NOT LIFT a node that is not quarantined.
-* Do NOT ALERT a non-retailer node.
-
-===== TRACING STRATEGY (Why it matters) =====
-Early TRACE wins the game:
-- TRACE reveals the origin farm and full path of a batch
-- Once you know the source, INSPECT it to confirm, then QUARANTINE it (+4.0)
-- This stops contamination at the root, not downstream
-- Cost: only -0.1 per TRACE; ROI is huge vs blind INSPECTs
-
-Observable signals to act on:
-- Illness reports at retailers → trace those batches backward to origin
-- High sensor spikes at farms → inspect to confirm, then quarantine if contaminated
-- Multiple retailers sick → likely shared upstream source → trace to find it
-
-===== OUTPUT FORMAT =====
-Exactly one action. One line. No explanation. No JSON. No markdown.
-
+Output format — exactly one line, nothing else:
 TRACE <batch_id>
 INSPECT <node_id>
 QUARANTINE <node_id>
@@ -123,8 +82,17 @@ RECALL <batch_id>
 ALERT <node_id>
 WAIT"""
  
-RETRY_USER_PROMPT = """Your previous response was not a valid action.
-Output ONLY one valid action on a single line. No explanation. No JSON. No markdown.
+RETRY_USER_PROMPT = """Invalid action. Output ONLY one valid action. One line. No explanation.
+
+PRIORITY (top to bottom, first that applies):
+1. LIFT <node>       — lab_results[node]="clean" AND quarantined
+2. QUARANTINE <node> — lab_results[node]="contaminated" AND NOT quarantined (farms first)
+3. INSPECT <node>    — high sensor, not in lab_results, lab_budget > 0
+4. TRACE <batch_id>  — use traceable_batch_ids list ONLY (not already-traced batches)
+5. RECALL <batch_id> — contaminated batch at retailer, recall_budget >= 10
+6. WAIT              — nothing else applies
+
+HARD: Never TRACE a batch from traced_batches. Never repeat the same TRACE as your last action.
 
 Valid formats:
 TRACE <batch_id>
@@ -133,18 +101,7 @@ QUARANTINE <node_id>
 LIFT <node_id>
 RECALL <batch_id>
 ALERT <node_id>
-WAIT
-
-PRIORITY CHECK (in order):
-1. Any clean node still quarantined? -> LIFT it
-2. Any contaminated node not yet quarantined? -> QUARANTINE it (farms first)
-3. Any visible batch + illness exists? -> TRACE it (cheap, finds source)
-4. Any high-risk uninspected node + lab_budget > 0? -> INSPECT it
-5. Any contaminated batch at retailer + recall_budget >= 10? -> RECALL it
-6. Otherwise -> WAIT
-
-CRITICAL: Only use batch IDs from visible_batch_ids for TRACE/RECALL.
-Never repeat the exact same action two steps in a row unless new lab results landed."""
+WAIT"""
 
 ObservationT = TypeVar("ObservationT")
 
@@ -152,15 +109,15 @@ ObservationT = TypeVar("ObservationT")
 @dataclass
 class StepResult(Generic[ObservationT]):
     observation: ObservationT
-    reward: float | None = None
+    reward: Optional[float] = None
     done: bool = False
 
 
 @dataclass
 class ModelAccessState:
-    fatal_error: str | None = None
+    fatal_error: Optional[str] = None
     fatal_error_reported: bool = False
-    circuit_open_reason: str | None = None
+    circuit_open_reason: Optional[str] = None
     circuit_open_reported: bool = False
     consecutive_unusable_steps: int = 0
 
@@ -175,7 +132,7 @@ class LocalEnvRunner:
         self.seed = seed
 
     @property
-    def episode_log(self) -> list[dict[str, Any]]:
+    def episode_log(self) -> List[Dict[str, Any]]:
         return self._env.episode_log
 
     def reset(self) -> StepResult[FoodCrisisObservation]:
@@ -198,30 +155,45 @@ def normalize_single_line(value: str) -> str:
     return " ".join(str(value).split())
 
 
-def visible_batch_ids(observation: FoodCrisisObservation) -> list[str]:
-    batch_ids: list[str] = []
-    seen: set[str] = set()
-    # Batches currently at nodes
+def visible_batch_ids(observation: FoodCrisisObservation) -> List[str]:
+    """Return batch IDs currently sitting at nodes that have NOT yet been traced.
+    Already-traced batches are excluded — re-tracing them is a no-op waste."""
+    already_traced = {bid.strip().lower() for bid in observation.traced_batches}
+    batch_ids: List[str] = []
+    seen: set = set()
+    for node in observation.nodes:
+        for batch_id in node.batch_ids:
+            normalized = batch_id.strip().lower()
+            if normalized and normalized not in seen and normalized not in already_traced:
+                seen.add(normalized)
+                batch_ids.append(normalized)
+    return batch_ids
+
+
+def traceable_batch_ids(observation: FoodCrisisObservation) -> List[str]:
+    """Alias used in prompts — same as visible_batch_ids (untraced batches at nodes)."""
+    return visible_batch_ids(observation)
+
+
+def recallable_batch_ids(observation: FoodCrisisObservation) -> List[str]:
+    """All active (not recalled/delivered) batch IDs visible at nodes, including already-traced ones.
+    RECALL is valid on any active batch regardless of trace status."""
+    batch_ids: List[str] = []
+    seen: set = set()
     for node in observation.nodes:
         for batch_id in node.batch_ids:
             normalized = batch_id.strip().lower()
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 batch_ids.append(normalized)
-    # Batches already traced (model can reference these)
-    for batch_id in observation.traced_batches.keys():
-        normalized = batch_id.strip().lower()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            batch_ids.append(normalized)
     return batch_ids
 
 
-def available_node_ids(observation: FoodCrisisObservation) -> list[str]:
+def available_node_ids(observation: FoodCrisisObservation) -> List[str]:
     return [node.node_id for node in observation.nodes]
 
 
-def extract_pending_inspection_nodes(observation: FoodCrisisObservation) -> list[str]:
+def extract_pending_inspection_nodes(observation: FoodCrisisObservation) -> List[str]:
     summary = observation.natural_language_summary or ""
     match = re.search(r"Pending lab tests:\s*([^.]*)\.", summary)
     if match is None:
@@ -229,8 +201,8 @@ def extract_pending_inspection_nodes(observation: FoodCrisisObservation) -> list
     payload = normalize_single_line(match.group(1))
     if not payload or payload.lower() == "none":
         return []
-    pending_nodes: list[str] = []
-    seen: set[str] = set()
+    pending_nodes: List[str] = []
+    seen: set = set()
     for item in payload.split(","):
         node_id = item.strip().split("@", 1)[0].strip().lower()
         if node_id and node_id not in seen:
@@ -239,74 +211,102 @@ def extract_pending_inspection_nodes(observation: FoodCrisisObservation) -> list
     return pending_nodes
 
 
-def inspected_or_pending_nodes(observation: FoodCrisisObservation) -> list[str]:
+def inspected_or_pending_nodes(observation: FoodCrisisObservation) -> List[str]:
     combined = {node_id.lower() for node_id in observation.lab_results}
     combined.update(extract_pending_inspection_nodes(observation))
     return sorted(combined)
 
 
-def uninspected_nodes(observation: FoodCrisisObservation) -> list[str]:
+def uninspected_nodes(observation: FoodCrisisObservation) -> List[str]:
     all_nodes = {n.lower() for n in available_node_ids(observation)}
     already_done = set(inspected_or_pending_nodes(observation))
     return sorted(all_nodes - already_done)
 
 
-def build_user_prompt(step: int, observation: FoodCrisisObservation, history: list[str]) -> str:
-    recent_history = "\n".join(history[-4:]) if history else "none"
-    illness_payload = [report.model_dump() for report in observation.illness_reports]
-    node_ids = ", ".join(available_node_ids(observation)) or "none"
-    batch_ids = ", ".join(visible_batch_ids(observation)) or "none"
+def build_user_prompt(step: int, observation: FoodCrisisObservation, history: List[str]) -> str:
+    recent_history = "\n".join(history[-3:]) if history else "none"
+
+    traceable = ", ".join(traceable_batch_ids(observation)) or "none"
+    recallable = ", ".join(recallable_batch_ids(observation)) or "none"
+
+    # Compact traced-batches summary — show only origin node per batch to save tokens
+    # Full paths are already communicated via the NL summary; we only need origin attribution here.
+    traced_origins: Dict[str, str] = {}
+    for bid, path in observation.traced_batches.items():
+        traced_origins[bid] = path[0] if path else "?"
+    traced_summary = json.dumps(traced_origins, sort_keys=True, separators=(",", ":")) if traced_origins else "{}"
+
     pending_text = ", ".join(extract_pending_inspection_nodes(observation)) or "none"
-    inspected_pending_text = ", ".join(inspected_or_pending_nodes(observation)) or "none"
+    inspected_text = ", ".join(inspected_or_pending_nodes(observation)) or "none"
     uninspected_text = ", ".join(uninspected_nodes(observation)) or "none"
 
-    # Explicit action hints — removes ambiguity for the model
+    # Derive previous action
+    previous_action = "none"
+    if history:
+        m = re.search(r"action=(\S+(?:\s+\S+)?)", history[-1])
+        if m:
+            previous_action = m.group(1).strip()
+
+    # Compute compact quarantine_status (only show quarantined=true nodes to save tokens)
+    quarantined_nodes = sorted(nid for nid, q in observation.quarantine_status.items() if q)
+    quarantine_text = ", ".join(quarantined_nodes) if quarantined_nodes else "none"
+
+    # Compact lab_results
+    lab_text = json.dumps(observation.lab_results, sort_keys=True, separators=(",", ":")) if observation.lab_results else "{}"
+
+    # Illness summary — compact
+    illness_text = "; ".join(
+        f"{r.retailer_id}:{r.case_count}cases@t{r.timestep_reported}"
+        for r in observation.illness_reports
+    ) if observation.illness_reports else "none"
+
+    # Explicit action hints
     hints: list[str] = []
 
-    to_quarantine = [
+    to_quarantine = sorted(
         nid for nid, result in observation.lab_results.items()
         if result == "contaminated" and not observation.quarantine_status.get(nid, False)
-    ]
+    )
     if to_quarantine:
-        hints.append(
-            f"ACTION REQUIRED: Confirmed contaminated and NOT quarantined: "
-            f"{', '.join(sorted(to_quarantine))} -> QUARANTINE one NOW."
-        )
+        hints.append(f"QUARANTINE NOW: {', '.join(to_quarantine)} (confirmed contaminated, farms=+4.0)")
 
-    to_lift = [
+    to_lift = sorted(
         nid for nid, result in observation.lab_results.items()
         if result == "clean" and observation.quarantine_status.get(nid, False)
-    ]
+    )
     if to_lift:
-        hints.append(
-            f"ACTION AVAILABLE: Confirmed clean but still quarantined: "
-            f"{', '.join(sorted(to_lift))} -> LIFT one."
-        )
+        hints.append(f"LIFT: {', '.join(to_lift)} (confirmed clean, still quarantined)")
 
-    if not to_quarantine and not to_lift and not uninspected_nodes(observation) and pending_text != "none":
-        hints.append("All nodes inspected or pending. Await lab results -> WAIT.")
+    if not to_quarantine and not to_lift:
+        if traceable != "none":
+            hints.append(f"TRACE one of: {traceable}")
+        elif observation.lab_budget > 0 and uninspected_text != "none":
+            hints.append(f"INSPECT one of: {uninspected_text} (highest sensor first)")
+        elif observation.lab_budget <= 0 and recallable != "none":
+            hints.append(f"lab_budget=0 — no more INSPECTs. Consider RECALL if batch is contaminated.")
+        elif pending_text != "none":
+            hints.append("Pending labs; nothing else to do -> WAIT")
+        else:
+            hints.append("WAIT")
 
-    hint_block = "\n".join(hints) if hints else "No urgent action hints — use your judgment."
+    hint_block = "\n".join(hints)
 
     return (
-        f"=== STEP {step} OBSERVATION ===\n\n"
-        f"Natural language summary:\n{observation.natural_language_summary}\n\n"
-        f"=== ACTION HINTS ===\n{hint_block}\n\n"
-        "=== STRUCTURED FIELDS ===\n"
-        f"- lab_results: {json.dumps(observation.lab_results, sort_keys=True, separators=(',', ':'))}\n"
-        f"- quarantine_status: {json.dumps(observation.quarantine_status, sort_keys=True, separators=(',', ':'))}\n"
-        f"- sensor_readings: {json.dumps(observation.sensor_readings, sort_keys=True, separators=(',', ':'))}\n"
-        f"- pending_inspections: {pending_text}\n"
-        f"- already_inspected_or_pending_nodes: {inspected_pending_text}\n"
-        f"- nodes_available_to_inspect: {uninspected_text}\n"
-        f"- illness_reports: {json.dumps(illness_payload, sort_keys=True, separators=(',', ':'))}\n"
-        f"- lab_budget: {observation.lab_budget}\n"
-        f"- recall_budget: {observation.recall_budget}\n"
-        f"- public_trust: {observation.public_trust:.2f}\n"
-        f"- visible_batch_ids: {batch_ids}\n"
-        f"- available_node_ids: {node_ids}\n"
-        f"- recent_history:\n{recent_history}\n\n"
-        "Output exactly one valid action."
+        f"STEP {step} | prev={previous_action}\n"
+        f"{observation.natural_language_summary}\n\n"
+        f"HINTS: {hint_block}\n\n"
+        f"lab_results:{lab_text}\n"
+        f"quarantined:{quarantine_text}\n"
+        f"pending_labs:{pending_text}\n"
+        f"inspected:{inspected_text}\n"
+        f"uninspected:{uninspected_text}\n"
+        f"illness:{illness_text}\n"
+        f"lab_budget:{observation.lab_budget} recall_budget:{observation.recall_budget} trust:{observation.public_trust:.2f}\n"
+        f"traceable:{traceable}\n"
+        f"recallable:{recallable}\n"
+        f"traced_origins:{traced_summary}\n"
+        f"history:\n{recent_history}\n"
+        "Action:"
     )
 
 
@@ -368,11 +368,11 @@ def strip_outer_quotes(text: str) -> str:
     return stripped
 
 
-def candidate_texts_from_response(response_text: str) -> list[str]:
-    candidates: list[str] = []
-    seen: set[str] = set()
+def candidate_texts_from_response(response_text: str) -> List[str]:
+    candidates: List[str] = []
+    seen: set = set()
 
-    def add(candidate: str | None) -> None:
+    def add(candidate: Optional[str]) -> None:
         if not candidate:
             return
         normalized = candidate.strip()
@@ -399,7 +399,7 @@ def candidate_texts_from_response(response_text: str) -> list[str]:
     return candidates
 
 
-def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -> str | None:
+def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -> Optional[str]:
     first_line = strip_outer_quotes(candidate.splitlines()[0].strip())
     text = normalize_single_line(first_line)
     if not text:
@@ -428,20 +428,23 @@ def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -
 
     normalized_target = target.lower()
     node_lookup = {node.node_id.lower(): node for node in observation.nodes}
-    batch_lookup = set(visible_batch_ids(observation))
+    trace_lookup = set(visible_batch_ids(observation))       # untraced batches only
+    recall_lookup = set(recallable_batch_ids(observation))   # all active batches at nodes
 
     if verb in {"INSPECT", "QUARANTINE", "LIFT"}:
         return f"{verb} {normalized_target}" if normalized_target in node_lookup else None
     if verb == "ALERT":
         node = node_lookup.get(normalized_target)
         return f"ALERT {normalized_target}" if (node and node.node_type == "retailer") else None
-    if verb in {"RECALL", "TRACE"}:
-        return f"{verb} {normalized_target}" if normalized_target in batch_lookup else None
+    if verb == "TRACE":
+        return f"TRACE {normalized_target}" if normalized_target in trace_lookup else None
+    if verb == "RECALL":
+        return f"RECALL {normalized_target}" if normalized_target in recall_lookup else None
 
     return None
 
 
-def parse_model_action(response_text: str, observation: FoodCrisisObservation) -> str | None:
+def parse_model_action(response_text: str, observation: FoodCrisisObservation) -> Optional[str]:
     for candidate in candidate_texts_from_response(response_text):
         parsed = parse_candidate_action(candidate, observation)
         if parsed:
@@ -449,7 +452,7 @@ def parse_model_action(response_text: str, observation: FoodCrisisObservation) -
     return None
 
 
-def apply_action_guard(action_str: str, observation: FoodCrisisObservation) -> str:
+def apply_action_guard(action_str: str, observation: FoodCrisisObservation, history: Optional[List[str]] = None) -> str:
     """Block actions that would be wasted or cause errors in the environment."""
     parts = action_str.split(" ", 1)
     verb = parts[0].upper()
@@ -459,6 +462,10 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation) -> s
     known_results = {nid.lower(): result for nid, result in observation.lab_results.items()}
 
     if verb == "INSPECT":
+        # Block if no lab budget left — environment rejects and charges wasted-action penalty
+        if observation.lab_budget <= 0:
+            debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (lab_budget=0)")
+            return "WAIT"
         if target in pending_nodes:
             debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (already pending)")
             return "WAIT"
@@ -476,10 +483,118 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation) -> s
             debug_to_stderr(f"ACTION_GUARD: LIFT {target} -> WAIT (not quarantined)")
             return "WAIT"
 
+    if verb == "TRACE":
+        # Block if this batch was already traced — re-tracing learns nothing
+        already_traced = {bid.strip().lower() for bid in observation.traced_batches}
+        if target in already_traced:
+            debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> WAIT (already traced)")
+            return "WAIT"
+        # Block if the last step took the exact same TRACE action
+        if history:
+            last_action_match = re.search(r"action=(\S+(?:\s+\S+)?)", history[-1])
+            if last_action_match:
+                last_action = last_action_match.group(1).strip().lower()
+                if last_action == f"trace {target}":
+                    debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> WAIT (same as last step)")
+                    return "WAIT"
+        # Redirect TRACE to QUARANTINE when confirmed-contaminated unquarantined nodes exist
+        unquarantined_confirmed = sorted(
+            nid for nid, result in observation.lab_results.items()
+            if result == "contaminated" and not observation.quarantine_status.get(nid, False)
+        )
+        if unquarantined_confirmed:
+            best = unquarantined_confirmed[0]
+            debug_to_stderr(
+                f"ACTION_GUARD: TRACE {target} -> QUARANTINE {best} "
+                f"(confirmed contaminated, not yet quarantined)"
+            )
+            return f"QUARANTINE {best}"
+
+    if verb == "RECALL":
+        # Block if recall budget is insufficient (each recall costs 10)
+        if observation.recall_budget < 10:
+            debug_to_stderr(f"ACTION_GUARD: RECALL {target} -> WAIT (recall_budget={observation.recall_budget} < 10)")
+            return "WAIT"
+        # Block recall of non-existent/inactive batches
+        active_batches = set(recallable_batch_ids(observation))
+        if target not in active_batches:
+            debug_to_stderr(f"ACTION_GUARD: RECALL {target} -> WAIT (not an active batch at a node)")
+            return "WAIT"
+
     return action_str
 
 
-def request_model_completion(client: Any, model_name: str, messages: list[dict[str, str]]) -> str:
+def deterministic_fallback(observation: FoodCrisisObservation, history: List[str]) -> Optional[str]:
+    """Rule-based engine covering ~75% of steps without an LLM call.
+
+    Priority order (first match wins):
+      P1  QUARANTINE confirmed-contaminated node (farms first, +4.0 reward)
+      P2  LIFT confirmed-clean quarantined node
+      P3  RECALL confirmed-contaminated batch sitting at a retailer
+      P4  TRACE untraced batch at retailer (most urgent; finds source cheaply)
+      P5  TRACE untraced batch at warehouse (next-most-downstream)
+      P6  INSPECT highest-sensor uninspected upstream node (farm/processing)
+      P7  TRACE any remaining traceable batch (processing then farm)
+      P8  WAIT while pending labs are processing
+      P9  WAIT if no budget and nothing traceable remains
+      else -> None (LLM handles genuine ambiguity)
+    """
+    lab_results = observation.lab_results
+    quarantine = observation.quarantine_status
+
+    # ── P1: quarantine confirmed contaminated ───────────────────────────────
+    to_quarantine = [
+        nid for nid, r in lab_results.items()
+        if r == "contaminated" and not quarantine.get(nid, False)
+    ]
+    if to_quarantine:
+        farms_first = sorted(to_quarantine, key=lambda n: (0 if "farm" in n else 1))
+        return f"QUARANTINE {farms_first[0]}"
+
+    # ── P2: lift confirmed clean ────────────────────────────────────────────
+    to_lift = [nid for nid, r in lab_results.items() if r == "clean" and quarantine.get(nid, False)]
+    if to_lift:
+        return f"LIFT {to_lift[0]}"
+
+    # Pre-compute shared state once
+    pending: List[str] = extract_pending_inspection_nodes(observation)
+    pending_set: set = set(pending)
+    traceable: List[str] = traceable_batch_ids(observation)
+    traceable_set: set = set(traceable)
+    recallable: List[str] = recallable_batch_ids(observation)
+    recallable_set: set = set(recallable)
+    confirmed_contaminated_nodes: set = {nid for nid, r in lab_results.items() if r == "contaminated"}
+
+    # ── P3: recall confirmed-contaminated batch at a retailer ───────────────
+    if observation.recall_budget >= 10:
+        for node in observation.nodes:
+            if node.node_type == "retailer" and node.node_id in confirmed_contaminated_nodes:
+                for bid in node.batch_ids:
+                    if bid.strip().lower() in recallable_set:
+                        return f"RECALL {bid.strip().lower()}"
+
+    # ── P4: trace untraced batch at retailer ───────────────────────────────
+    if traceable_set:
+        for node in observation.nodes:
+            if node.node_type == "retailer":
+                for bid in node.batch_ids:
+                    normalized = bid.strip().lower()
+                    if normalized in traceable_set:
+                        return f"TRACE {normalized}"
+
+    # ── P5: wait while pending lab results are on their way ────────────────
+    if pending:
+        return "WAIT"
+
+    # ── P9: nothing actionable left ────────────────────────────────────────
+    if observation.lab_budget <= 0 and not traceable_set:
+        return "WAIT"
+
+    return None  # genuine ambiguity — let the LLM decide
+
+
+def request_model_completion(client: Any, model_name: str, messages: List[Dict[str, str]]) -> str:
+    """Request a completion from the LLM model."""
     completion = client.chat.completions.create(
         model=model_name,
         messages=messages,
@@ -496,7 +611,7 @@ def request_action(
     client: Any,
     model_name: str,
     observation: FoodCrisisObservation,
-    history: list[str],
+    history: List[str],
     step: int,
     access_state: ModelAccessState,
 ) -> str:
@@ -510,6 +625,12 @@ def request_action(
             debug_to_stderr("MODEL_CIRCUIT_OPEN:", access_state.circuit_open_reason)
             access_state.circuit_open_reported = True
         return "WAIT"
+
+    # Deterministic fallback: skip LLM when the correct action is unambiguous
+    fallback = deterministic_fallback(observation, history)
+    if fallback is not None:
+        debug_to_stderr(f"DETERMINISTIC_FALLBACK: {fallback}")
+        return fallback
 
     # Rate-limit sleep — keeps Groq free tier inside 30 req/min
     time.sleep(LLM_RATE_LIMIT_SLEEP)
@@ -529,8 +650,7 @@ def request_action(
             access_state.consecutive_unusable_steps = 0
             return parsed_action
 
-        # Retry once on invalid response
-        time.sleep(LLM_RATE_LIMIT_SLEEP)
+        # Retry once on invalid response — immediate, no extra sleep
         retry_messages = messages + [
             {"role": "assistant", "content": response_text},
             {"role": "user", "content": RETRY_USER_PROMPT},
@@ -595,7 +715,7 @@ def log_start(task: str, env: str, model: str) -> None:
     )
 
 
-def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     error_val = normalize_single_line(error) if error else "null"
     done_val = str(bool(done)).lower()
     print(
@@ -604,15 +724,15 @@ def log_step(step: int, action: str, reward: float, done: bool, error: str | Non
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(bool(success)).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] success={str(bool(success)).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
 
-def extract_step_error(observation: FoodCrisisObservation) -> str | None:
+def extract_step_error(observation: FoodCrisisObservation) -> Optional[str]:
     return "action_error" if observation.last_action_error else None
 
 
@@ -653,7 +773,7 @@ def run_task(task_id: int, task_config: TaskConfig, seed: int, client: Any, mode
                 step=step,
                 access_state=MODEL_ACCESS_STATE,
             )
-            action_str = apply_action_guard(action_str, observation)
+            action_str = apply_action_guard(action_str, observation, history)
 
             debug_to_stderr(
                 f"STEP {step} | final_action={action_str} | "

@@ -3,14 +3,14 @@
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class NodeSpec:
     node_id: str
     node_type: str
     downstream: tuple[str, ...]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ScoreWeights:
     containment: float
     precision: float
@@ -18,7 +18,7 @@ class ScoreWeights:
     trust: float
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TaskConfig:
     task_id: int
     name: str

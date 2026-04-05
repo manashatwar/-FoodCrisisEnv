@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RewardBreakdown:
     shipment_penalty: float
     illness_penalty: float

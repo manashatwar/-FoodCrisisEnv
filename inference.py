@@ -51,55 +51,83 @@ LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "2.2"))
 SYSTEM_PROMPT = """You are a food safety incident responder controlling FoodCrisisEnv.
 Your job: contain contamination quickly while preserving public trust and limited budgets.
 
-===== STRICT DECISION PRIORITY — follow in order =====
+CRITICAL: This is a tracing task. Find the SOURCE farm, not just reactive symptoms.
+- Quarantining source farm: +4.0 reward (high value!)
+- Quarantining downstream contaminated node: +2.0 reward (half the value)
+- Wrong quarantine: -2.0 + trust damage (very costly)
+- TRACE is cheap (-0.1 cost) and reveals source — use it early and often
 
-1. LIFT first: If any node is in lab_results as "clean" AND is currently quarantined -> LIFT it.
-   Example: lab_results show farm_a=clean, quarantine_status shows farm_a=true -> output: LIFT farm_a
+Supply chain flow: farm -> processing -> warehouse -> retailer
+Contamination starts at source(s) and spreads downstream each step. Once at retail, it's exposure and illness cases.
 
-2. QUARANTINE second: If any node is in lab_results as "contaminated" AND is NOT quarantined -> QUARANTINE it.
-   Prioritize upstream nodes (farms before processing, processing before warehouse).
-   Example: lab_results show farm_b=contaminated, not yet quarantined -> output: QUARANTINE farm_b
+===== DECISION FLOW (Priority Order) =====
 
-3. RECALL third: If recall_budget >= 10 AND a batch is at a confirmed contaminated node
-   or illness-reported retailer -> RECALL it.
-   Example: farm_b is contaminated and has batch farm_b_batch_001 -> output: RECALL farm_b_batch_001
+At each step, follow this priority exactly:
 
-4. INSPECT fourth: If lab_budget > 0 AND nodes_available_to_inspect is not empty -> pick the best one.
-   - NEVER inspect a node in already_inspected_or_pending_nodes
-   - Prefer farms > processing > warehouse > retailer
-   - Prefer nodes whose downstream retailers have illness reports
-   - Prefer nodes with highest sensor readings
+1. LIFT first: Any node in lab_results="clean" AND currently quarantined? -> LIFT it
+   (Restores supply chain, builds trust, no cost)
 
-5. WAIT last: Only when all above options are exhausted.
+2. QUARANTINE second: Any node in lab_results="contaminated" AND NOT quarantined? -> QUARANTINE it
+   (Prioritize farms (source) over processing over warehouse — upstream first)
+   (Farms: +4.0 reward, others: +2.0)
 
-===== HARD RULES =====
-- NEVER output INSPECT for a node in already_inspected_or_pending_nodes
-- NEVER output QUARANTINE for a node already quarantined (quarantine_status=true)
-- NEVER output LIFT for a node that is not quarantined
-- NEVER output RECALL for a batch not in visible_batch_ids
-- ALERT only targets retailer nodes and costs trust permanently
-- Do NOT repeat the exact same action as the previous step unless new lab results arrived
+3. TRACE third: visible_batch_ids NOT empty AND (illness_reports present OR high sensor nodes exist)?
+   -> TRACE the most exposed batch (from retailer if possible, else highest risk)
+   (Cheap (-0.1) way to find source origin and path; low risk)
+
+4. INSPECT fourth: Uninspected high-risk nodes AND lab_budget > 0?
+   -> INSPECT the most suspicious node (high sensor, near illness, or upstream of contamination)
+   (Costs lab_budget=1; use selectively on ambiguous nodes)
+
+5. RECALL fifth: Contaminated batch already at retailer/warehouse AND recall_budget >= 10?
+   -> RECALL it (prevents further exposure; +1.5 reward for correct recall)
+   (Only when you're confident batch is contaminated)
+
+6. ALERT sixth: Retailer with active illness AND no quarantine/alert yet AND still waiting?
+   -> ALERT it (buys 3 steps, costs -0.08 trust, but slows exposure)
+   (Use sparingly; only when necessary to delay while waiting for lab results)
+
+7. WAIT: Only when nothing above applies
+   (Safest action when uncertain; minimal cost)
+
+===== CRITICAL RULES — NEVER BREAK THESE =====
+* visible_batch_ids is ground truth. ONLY TRACE/RECALL batches you see here.
+* visible_batch_ids = batches_currently_at_nodes + already_traced_batches
+* Do NOT hallucinate batch IDs. If it's not in visible_batch_ids, don't TRACE it.
+* Do NOT repeat the same action two steps in a row (unless new lab results just landed).
+* Do NOT INSPECT a node already in lab_results or pending inspection.
+* Do NOT QUARANTINE an already-quarantined node.
+* Do NOT LIFT a node that is not quarantined.
+* Do NOT ALERT a non-retailer node.
+
+===== TRACING STRATEGY (Why it matters) =====
+Early TRACE wins the game:
+- TRACE reveals the origin farm and full path of a batch
+- Once you know the source, INSPECT it to confirm, then QUARANTINE it (+4.0)
+- This stops contamination at the root, not downstream
+- Cost: only -0.1 per TRACE; ROI is huge vs blind INSPECTs
+
+Observable signals to act on:
+- Illness reports at retailers → trace those batches backward to origin
+- High sensor spikes at farms → inspect to confirm, then quarantine if contaminated
+- Multiple retailers sick → likely shared upstream source → trace to find it
 
 ===== OUTPUT FORMAT =====
 Exactly one action. One line. No explanation. No JSON. No markdown.
 
+TRACE <batch_id>
 INSPECT <node_id>
 QUARANTINE <node_id>
 LIFT <node_id>
 RECALL <batch_id>
 ALERT <node_id>
-WAIT
-
-===== EXAMPLES =====
-lab_results={farm_b: contaminated}, quarantine_status={farm_b: false} -> QUARANTINE farm_b
-lab_results={farm_a: clean}, quarantine_status={farm_a: true} -> LIFT farm_a
-nodes_available_to_inspect=[farm_a, farm_b], sensor farm_b=0.82 -> INSPECT farm_b
-all nodes inspected or pending, no quarantine needed -> WAIT"""
-
+WAIT"""
+ 
 RETRY_USER_PROMPT = """Your previous response was not a valid action.
 Output ONLY one valid action on a single line. No explanation. No JSON. No markdown.
 
 Valid formats:
+TRACE <batch_id>
 INSPECT <node_id>
 QUARANTINE <node_id>
 LIFT <node_id>
@@ -107,9 +135,16 @@ RECALL <batch_id>
 ALERT <node_id>
 WAIT
 
-Check: if lab_results has contaminated nodes not yet quarantined -> output QUARANTINE <node_id>.
-Check: if nodes_available_to_inspect is not empty and lab_budget > 0 -> output INSPECT <node_id>.
-Otherwise output WAIT."""
+PRIORITY CHECK (in order):
+1. Any clean node still quarantined? -> LIFT it
+2. Any contaminated node not yet quarantined? -> QUARANTINE it (farms first)
+3. Any visible batch + illness exists? -> TRACE it (cheap, finds source)
+4. Any high-risk uninspected node + lab_budget > 0? -> INSPECT it
+5. Any contaminated batch at retailer + recall_budget >= 10? -> RECALL it
+6. Otherwise -> WAIT
+
+CRITICAL: Only use batch IDs from visible_batch_ids for TRACE/RECALL.
+Never repeat the exact same action two steps in a row unless new lab results landed."""
 
 ObservationT = TypeVar("ObservationT")
 
@@ -166,12 +201,19 @@ def normalize_single_line(value: str) -> str:
 def visible_batch_ids(observation: FoodCrisisObservation) -> list[str]:
     batch_ids: list[str] = []
     seen: set[str] = set()
+    # Batches currently at nodes
     for node in observation.nodes:
         for batch_id in node.batch_ids:
             normalized = batch_id.strip().lower()
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 batch_ids.append(normalized)
+    # Batches already traced (model can reference these)
+    for batch_id in observation.traced_batches.keys():
+        normalized = batch_id.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            batch_ids.append(normalized)
     return batch_ids
 
 
@@ -501,12 +543,10 @@ def request_action(
             access_state.consecutive_unusable_steps = 0
             return retry_action
 
-        access_state.consecutive_unusable_steps += 1
-        if access_state.consecutive_unusable_steps >= MAX_CONSECUTIVE_UNUSABLE_STEPS:
-            access_state.circuit_open_reason = (
-                f"{access_state.consecutive_unusable_steps} consecutive unusable model turns; "
-                "defaulting to WAIT for remaining steps"
-            )
+        # Parse failure on both attempts — but this is NOT a model error, just bad action format
+        # Don't increment circuit breaker for parse failures; only for actual API/model errors
+        debug_to_stderr("PARSE_FAILURE: both initial and retry unparseable")
+        return "WAIT"
 
     except Exception as exc:
         debug_to_stderr("MODEL_REQUEST_ERROR:", exc)
@@ -527,13 +567,20 @@ def request_action(
                     return parsed
             except Exception as retry_exc:
                 debug_to_stderr("MODEL_REQUEST_ERROR_AFTER_BACKOFF:", retry_exc)
-            access_state.consecutive_unusable_steps += 1
-
-        else:
+            # Rate limit persisted after backoff — this IS a real error
             access_state.consecutive_unusable_steps += 1
             if access_state.consecutive_unusable_steps >= MAX_CONSECUTIVE_UNUSABLE_STEPS:
                 access_state.circuit_open_reason = (
-                    f"{access_state.consecutive_unusable_steps} consecutive failures; "
+                    f"{access_state.consecutive_unusable_steps} consecutive rate limit failures; "
+                    "defaulting to WAIT for remaining steps"
+                )
+
+        else:
+            # Other exceptions (network, timeout, etc.) — real errors
+            access_state.consecutive_unusable_steps += 1
+            if access_state.consecutive_unusable_steps >= MAX_CONSECUTIVE_UNUSABLE_STEPS:
+                access_state.circuit_open_reason = (
+                    f"{access_state.consecutive_unusable_steps} consecutive API failures; "
                     "defaulting to WAIT for remaining steps"
                 )
 

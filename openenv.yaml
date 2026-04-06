@@ -1,4 +1,4 @@
-﻿name: food-crisis-env
+﻿name: FoodCrisisEnv
 version: "1.0.0"
 description: >
   FoodCrisisEnv is a deterministic OpenEnv benchmark for food safety outbreak

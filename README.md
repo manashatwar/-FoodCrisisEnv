@@ -183,11 +183,11 @@ Task-specific weights shift the emphasis from pure containment on easy episodes 
 
 ## Task suite
 
-| Task | Difficulty | Description | Noise | Illness Delay | Lab Budget | Recall Budget | Max Steps |
-|:----:|:----------:|:-----------|------:|:------:|:------:|:------:|:------:|
-| 1 | Easy | Single source, low noise, fast reports, generous budgets | 0.05 | 1 | 10 | 100 | 48 |
-| 2 | Medium | Multi-source outbreak with delayed reports and tighter budgets | 0.15 | 3 | 6 | 60 | 60 |
-| 3 | Hard | Adversarial false spikes, delayed reports, re-seeding, and high trust pressure | 0.25 | 5 | 4 | 40 | 72 |
+| Task | Difficulty | Description                                                                    | Noise | Illness Delay | Lab Budget | Recall Budget | Max Steps |
+| :--: | :--------: | :----------------------------------------------------------------------------- | ----: | :-----------: | :--------: | :-----------: | :-------: |
+|  1   |    Easy    | Single source, low noise, fast reports, generous budgets                       |  0.05 |       1       |     10     |      100      |    48     |
+|  2   |   Medium   | Multi-source outbreak with delayed reports and tighter budgets                 |  0.15 |       3       |     6      |      60       |    60     |
+|  3   |    Hard    | Adversarial false spikes, delayed reports, re-seeding, and high trust pressure |  0.25 |       5       |     4      |      40       |    72     |
 
 Difficulty progression is real:
 
@@ -393,7 +393,7 @@ python baselines/food_crisis_agent.py
 ### Run the server
 
 ```bash
-uvicorn server.app:app --host 0.0.0.0 --port 8000
+uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
 Endpoints:
@@ -406,19 +406,32 @@ Endpoints:
 ### Docker
 
 ```bash
-docker build -t food-crisis-env .
-docker run --rm -p 8000:8000 --env-file .env food-crisis-env
+
+docker build -t foodcrisisenv:latest .
+
+# Server runs on port 7860 (required for HF Spaces)
+docker run --rm -p 7860:7860 --env-file .env foodcrisisenv:latest
+
+# Example with Groq API:
+docker run -d \
+  -p 7860:7860 \
+  -e HF_TOKEN=your_groq_api_key_here \
+  -e API_BASE_URL=https://api.groq.com/openai/v1 \
+  -e MODEL_NAME=llama-3.1-8b-instant \
+  --name foodcrisis-server \
+  foodcrisisenv:latest
+
+docker stop foodcrisis-server
 ```
 
-## Optional lightweight training
-
-The repository also includes a lightweight CPU-friendly training demo:
+Test endpoints:
 
 ```bash
-python train.py
+curl http://localhost:7860/health
+curl http://localhost:7860/state
+curl -X POST http://localhost:7860/step -H "Content-Type: application/json" -d '{"action": {"action_type": "WAIT"}}'
+curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d '{"task_id": 1}
 ```
-
-This is a small GRPO-style rollout-and-update loop that demonstrates that FoodCrisisEnv supports learning from interaction without requiring a heavy RL stack.
 
 ## Project layout
 
@@ -442,14 +455,6 @@ This is a small GRPO-style rollout-and-update loop that demonstrates that FoodCr
 └── tests/
     └── test_environment.py
 ```
-
-## Submission checklist
-
-- OpenEnv validation passes from repo root
-- Docker builds and serves `/health`, `/reset`, `/step`, and `/state`
-- `inference.py` runs with or without external model credentials
-- the environment is deterministic under fixed seeds
-- the grader returns scores in `[0.0, 1.0]`
 
 ## License
 

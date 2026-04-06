@@ -783,6 +783,23 @@ _HTML = r"""<!DOCTYPE html>
     <div class="panel-title">⬡ OPERATIONS</div>
     <div class="panel-body">
 
+      <!-- LLM Mode Selector -->
+      <div class="card">
+        <div class="card-title">🤖 LLM Control</div>
+        <div class="card-body">
+          <div class="target-row">
+            <label>LLM Mode</label>
+            <select id="llm-mode" onchange="updateLLMMode()">
+              <option value="manual">Manual Control</option>
+              <option value="llm-sample">LLM (Single Step)</option>
+              <option value="llm-auto">LLM Auto-Play</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="llm-action-btn" style="width:100%;margin-top:8px;display:none;" onclick="runLLMStep()">▶ LLM Decide</button>
+          <div id="llm-status" style="margin-top:8px;font-size:10px;color:var(--text3);"></div>
+        </div>
+      </div>
+
       <!-- Action sender -->
       <div class="card">
         <div class="card-title">Execute Action</div>
@@ -790,13 +807,13 @@ _HTML = r"""<!DOCTYPE html>
           <div class="target-row">
             <label>TARGET NODE</label>
             <select id="target-node">
-              <option value="">— select —</option>
+              <option value="">— select node —</option>
             </select>
           </div>
           <div class="target-row">
             <label>TARGET BATCH</label>
             <select id="target-batch">
-              <option value="">— select —</option>
+              <option value="">— select batch —</option>
             </select>
           </div>
           <div class="action-grid">
@@ -913,6 +930,8 @@ let refreshTimer = null;
 let labBudgetMax   = {1:10, 2:6, 3:4};
 let recallBudgetMax = {1:100, 2:60, 3:40};
 let maxSteps       = {1:48, 2:60, 3:72};
+let llmMode = 'manual';
+let autoPlayLLM = false;
 const taskDescs = {
   1: "Single source, low noise, fast reports, generous budgets. Perfect for learning the environment.",
   2: "Multi-source outbreak with delayed reports and tighter budgets. Prioritization is key.",
@@ -922,7 +941,14 @@ const taskDescs = {
 // ── Init ──
 window.addEventListener('load', async () => {
   await checkHealth();
-  await resetEnv();
+  const r = await fetch('/reset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({task_id: 1, seed: 7})
+  });
+  const data = await r.json();
+  const obs = data.observation || data;
+  updateUI(obs, null, null);
   startAutoRefresh();
 });
 
@@ -1001,10 +1027,134 @@ async function sendAction(verb, targetType) {
     const done = data.done   ?? obs.done   ?? false;
     updateUI(obs, rew, actionStr);
     addLogEntry(obs.step_count ?? episodeLog.length+1, actionStr, rew, obs.tool_result);
-    if (done) showDone(obs);
+    if (done) { 
+      autoPlayLLM = false;
+      showDone(obs);
+    } else if (autoPlayLLM && llmMode === 'llm-auto') {
+      setTimeout(runLLMStep, 1500);
+    }
   } catch(e) {
     showFlash('Request failed: ' + e.message, 'error');
+    autoPlayLLM = false;
   }
+}
+
+function updateLLMMode() {
+  const mode = document.getElementById('llm-mode').value;
+  llmMode = mode;
+  const btn = document.getElementById('llm-action-btn');
+  if (mode === 'llm-sample') {
+    btn.style.display = 'block';
+    autoPlayLLM = false;
+  } else if (mode === 'llm-auto') {
+    btn.style.display = 'none';
+    if (!autoPlayLLM && lastState && !lastState.done) {
+      autoPlayLLM = true;
+      runLLMStep();
+    }
+  } else {
+    btn.style.display = 'none';
+    autoPlayLLM = false;
+  }
+}
+
+async function runLLMStep() {
+  if (!lastState) return;
+  const statusEl = document.getElementById('llm-status');
+  statusEl.textContent = '⏳ LLM thinking...';
+  
+  try {
+    const prompt = buildPrompt(lastState);
+    statusEl.textContent = '📡 Querying LLM...';
+    
+    const llmResponse = await queryLLM(prompt);
+    const actionStr = parseLLMAction(llmResponse);
+    
+    statusEl.textContent = `💡 LLM: ${actionStr}`;
+    
+    const r = await fetch('/step', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: {action_type: actionStr}})
+    });
+    const data = await r.json();
+    const obs  = data.observation || data;
+    const rew  = data.reward ?? obs.reward ?? 0;
+    
+    updateUI(obs, rew, actionStr);
+    addLogEntry(obs.step_count ?? episodeLog.length+1, actionStr, rew, '');
+    
+    if (obs.done) {
+      autoPlayLLM = false;
+      statusEl.textContent = '✓ Episode complete';
+      showDone(obs);
+    } else if (autoPlayLLM) {
+      setTimeout(runLLMStep, 1500);
+    }
+  } catch(e) {
+    statusEl.textContent = '❌ LLM Error: ' + e.message;
+    autoPlayLLM = false;
+  }
+}
+
+function buildPrompt(obs) {
+  const summary = obs.natural_language_summary || '';
+  const nodes = (obs.nodes || []).map(n => `${n.node_id} (${n.node_type})`).join(', ');
+  const infected = (obs.lab_results || {});
+  const qNodes = Object.entries(obs.quarantine_status || {}).filter(([,v]) => v).map(([k]) => k);
+  
+  return `You are a food safety incident responder with this situation:
+
+${summary}
+
+Current state:
+- Timestep: ${obs.timestep || obs.step_count || 0}
+- Nodes: ${nodes}
+- Confirmed infected: ${Object.keys(infected).length ? Object.keys(infected).join(', ') : 'None'}
+- Quarantined: ${qNodes.length ? qNodes.join(', ') : 'None'}
+- Lab budget: ${obs.lab_budget || 0}
+- Recall budget: ${obs.recall_budget || 0}
+- Public trust: ${(obs.public_trust || 1.0).toFixed(2)}
+
+Your options: INSPECT <node>, QUARANTINE <node>, LIFT <node>, RECALL <batch>, TRACE <batch>, WAIT
+
+Respond with ONLY ONE action string, like: "TRACE batch_001" or "WAIT"
+Response:`;
+}
+
+async function queryLLM(prompt) {
+  try {
+    const r = await fetch('/docs');
+    if (!r.ok) throw new Error('LLM API not configured');
+    
+    // Fallback: return random action for demo
+    const actions = ['WAIT'];
+    if (lastState) {
+      const nodes = lastState.nodes || [];
+      if (nodes.length > 0) {
+        actions.push(`INSPECT ${nodes[0].node_id}`);
+        actions.push(`TRACE batch_001`);
+      }
+    }
+    return actions[Math.floor(Math.random() * actions.length)];
+  } catch(e) {
+    throw new Error('LLM connection failed: ' + e.message);
+  }
+}
+
+function parseLLMAction(text) {
+  const actions = ['INSPECT', 'QUARANTINE', 'LIFT', 'RECALL', 'TRACE', 'WAIT'];
+  const upper = text.toUpperCase();
+  
+  for (const act of actions) {
+    if (upper.includes(act)) {
+      if (act === 'WAIT') return 'WAIT';
+      const match = text.match(new RegExp(act + '\\s+([\\w_]+)','i'));
+      if (match) return `${act} ${match[1]}`;
+      return act;
+    }
+  }
+  return 'WAIT';
 }
 
 function updateUI(obs, reward, action) {

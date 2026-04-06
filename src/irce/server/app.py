@@ -1502,9 +1502,9 @@ async def test_llm():
     """
     Test the LLM connection and list available models.
     """
-    api_key = os.getenv("HF_TOKEN")
-    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
-    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+    api_key = os.getenv("HF_TOKEN", "").strip()
+    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1").strip()
+    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant").strip()
     
     if not api_key:
         return {"status": "error", "message": "HF_TOKEN not set in Space Secrets"}
@@ -1545,9 +1545,9 @@ async def llm_decide(prompt: dict):
     if not OpenAI:
         raise HTTPException(status_code=500, detail="OpenAI client not installed")
     
-    api_key = os.getenv("HF_TOKEN")
-    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
-    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+    api_key = os.getenv("HF_TOKEN", "").strip()
+    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1").strip()
+    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant").strip()
     
     if not api_key:
         raise HTTPException(status_code=400, detail="HF_TOKEN not configured in Space secrets")

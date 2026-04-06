@@ -1497,6 +1497,44 @@ function startAutoRefresh() {
 # LLM Endpoint — Call Groq model for decisions
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.get("/llm/test")
+async def test_llm():
+    """
+    Test the LLM connection and list available models.
+    """
+    api_key = os.getenv("HF_TOKEN")
+    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+    
+    if not api_key:
+        return {"status": "error", "message": "HF_TOKEN not set in Space Secrets"}
+    
+    try:
+        client = OpenAI(api_key=api_key, base_url=api_base)
+        
+        # Try to list models (if supported)
+        try:
+            models = client.models.list()
+            available_models = [m.id for m in models.data]
+        except:
+            available_models = ["(unable to fetch model list)"]
+        
+        return {
+            "status": "configured",
+            "api_base": api_base,
+            "model_requested": model,
+            "available_models": available_models,
+            "message": f"To use a different model, set MODEL_NAME in Space Secrets"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "api_base": api_base,
+            "model_requested": model,
+            "error": str(e),
+            "message": "Make sure HF_TOKEN is a valid Groq API key"
+        }
+
 @app.post("/llm/decide")
 async def llm_decide(prompt: dict):
     """

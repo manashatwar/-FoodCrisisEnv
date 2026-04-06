@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from importlib import import_module
 
+from fastapi import HTTPException
 from fastapi.responses import HTMLResponse
 
 try:
@@ -15,6 +17,11 @@ try:
 except ImportError:  # pragma: no cover
     from environment import FoodCrisisEnv
     from models import FoodCrisisAction, FoodCrisisObservation
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 
 def create_environment() -> FoodCrisisEnv:
@@ -1124,19 +1131,19 @@ Response:`;
 
 async function queryLLM(prompt) {
   try {
-    const r = await fetch('/docs');
-    if (!r.ok) throw new Error('LLM API not configured');
+    const r = await fetch('/llm/decide', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt: prompt})
+    });
     
-    // Fallback: return random action for demo
-    const actions = ['WAIT'];
-    if (lastState) {
-      const nodes = lastState.nodes || [];
-      if (nodes.length > 0) {
-        actions.push(`INSPECT ${nodes[0].node_id}`);
-        actions.push(`TRACE batch_001`);
-      }
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `LLM API error: ${r.status}`);
     }
-    return actions[Math.floor(Math.random() * actions.length)];
+    
+    const data = await r.json();
+    return data.action || 'WAIT';
   } catch(e) {
     throw new Error('LLM connection failed: ' + e.message);
   }
@@ -1481,6 +1488,44 @@ function startAutoRefresh() {
 </script>
 </body>
 </html>"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM Endpoint — Call Groq model for decisions
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/llm/decide")
+async def llm_decide(prompt: dict):
+    """
+    Call the LLM with a prompt and return a decision.
+    Expects: {"prompt": "..."}
+    Reads credentials from environment variables (HF_TOKEN, API_BASE_URL, MODEL_NAME)
+    """
+    if not OpenAI:
+        raise HTTPException(status_code=500, detail="OpenAI client not installed")
+    
+    api_key = os.getenv("HF_TOKEN")
+    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+    
+    if not api_key:
+        raise HTTPException(status_code=400, detail="HF_TOKEN not configured in Space secrets")
+    
+    try:
+        client = OpenAI(api_key=api_key, base_url=api_base)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a food safety incident responder. Respond with exactly one action."},
+                {"role": "user", "content": prompt.get("prompt", "")}
+            ],
+            temperature=0.3,
+            max_tokens=50,
+        )
+        decision = response.choices[0].message.content.strip()
+        return {"action": decision}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

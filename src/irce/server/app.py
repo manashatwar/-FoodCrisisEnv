@@ -986,10 +986,6 @@ async function resetEnv() {
   updateLog();
   document.getElementById('done-overlay').classList.remove('show');
   
-  // Pause auto-refresh during reset
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = null;
-  
   try {
     const r = await fetch('/reset', {
       method: 'POST',
@@ -999,12 +995,8 @@ async function resetEnv() {
     const data = await r.json();
     const obs = data.observation || data;
     updateUI(obs, null, null);
-    
-    // Restart auto-refresh after a short delay to ensure state is ready
-    setTimeout(startAutoRefresh, 500);
   } catch(e) {
     console.error('Reset failed', e);
-    startAutoRefresh();
   }
 }
 
@@ -1505,8 +1497,10 @@ function showDone(obs) {
 
 // ── Auto refresh ──
 function startAutoRefresh() {
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(fetchState, 3000);
+  // Disabled: auto-pollinf /state was causing stale/incomplete data and overwriting dropdowns
+  // The UI is updated immediately after /reset and /step, so we don't need polling
+  // if (refreshTimer) clearInterval(refreshTimer);
+  // refreshTimer = setInterval(fetchState, 3000);
 }
 </script>
 </body>
@@ -1549,6 +1543,7 @@ async def llm_decide(prompt: dict):
         return {"action": decision}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
+
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

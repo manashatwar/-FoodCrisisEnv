@@ -347,6 +347,10 @@ ALERT retailer_r2
 WAIT
 ```
 
+### Deployment on HF Spaces
+
+For HF Spaces deployment, this template integrates directly with the server running on port 7860. Users can submit observations from the `/state` endpoint to this prompt. See the [Docker](#docker) section below for quick setup.
+
 ## Quick start
 
 ### Install
@@ -406,7 +410,6 @@ Endpoints:
 ### Docker
 
 ```bash
-
 docker build -t foodcrisisenv:latest .
 
 # Server runs on port 7860 (required for HF Spaces)
@@ -422,6 +425,12 @@ docker run -d \
   foodcrisisenv:latest
 
 docker stop foodcrisis-server
+```
+
+**Port configuration**: The default port is 7860 (HF Spaces requirement). To use a different port in development, set `FOODCRISIS_PORT` environment variable:
+
+```bash
+docker run --rm -p 8080:8080 -e FOODCRISIS_PORT=8080 foodcrisisenv:latest
 ```
 
 Test endpoints:

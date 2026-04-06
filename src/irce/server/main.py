@@ -16,7 +16,7 @@ def main() -> None:
     uvicorn.run(
         app_path,
         host=os.getenv("FOODCRISIS_HOST", "0.0.0.0"),
-        port=int(os.getenv("FOODCRISIS_PORT", "8000")),
+        port=int(os.getenv("FOODCRISIS_PORT", "7860")),
         reload=os.getenv("FOODCRISIS_RELOAD", "false").lower() in {"1", "true", "yes"},
     )
 

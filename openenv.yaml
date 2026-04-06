@@ -8,7 +8,7 @@ description: >
 
 app: server.app:app
 runtime: fastapi
-port: 8000
+port: 7860
 inference: inference.py
 action_type: string
 observation_type: structured

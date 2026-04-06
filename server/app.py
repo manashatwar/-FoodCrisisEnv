@@ -21,7 +21,7 @@ def main() -> None:
     uvicorn.run(
         "server.app:app",
         host=os.getenv("IRCE_HOST", "0.0.0.0"),
-        port=int(os.getenv("IRCE_PORT", "8000")),
+        port=int(os.getenv("IRCE_PORT", "7860")),
         reload=os.getenv("IRCE_RELOAD", "false").lower() in {"1", "true", "yes"},
     )
 

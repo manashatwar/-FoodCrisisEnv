@@ -985,6 +985,11 @@ async function resetEnv() {
   episodeLog = [];
   updateLog();
   document.getElementById('done-overlay').classList.remove('show');
+  
+  // Pause auto-refresh during reset
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
+  
   try {
     const r = await fetch('/reset', {
       method: 'POST',
@@ -994,8 +999,12 @@ async function resetEnv() {
     const data = await r.json();
     const obs = data.observation || data;
     updateUI(obs, null, null);
+    
+    // Restart auto-refresh after a short delay to ensure state is ready
+    setTimeout(startAutoRefresh, 500);
   } catch(e) {
     console.error('Reset failed', e);
+    startAutoRefresh();
   }
 }
 

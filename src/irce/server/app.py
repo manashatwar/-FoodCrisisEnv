@@ -1542,31 +1542,41 @@ async def llm_decide(prompt: dict):
     Expects: {"prompt": "..."}
     Reads credentials from environment variables (HF_TOKEN, API_BASE_URL, MODEL_NAME)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if not OpenAI:
         raise HTTPException(status_code=500, detail="OpenAI client not installed")
     
-    api_key = os.getenv("HF_TOKEN", "").strip()
-    api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1").strip()
-    model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant").strip()
-    
-    if not api_key:
-        raise HTTPException(status_code=400, detail="HF_TOKEN not configured in Space secrets")
-    
     try:
+        api_key = os.getenv("HF_TOKEN", "").strip()
+        api_base = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1").strip()
+        model = os.getenv("MODEL_NAME", "llama-3.1-8b-instant").strip()
+        
+        if not api_key:
+            raise HTTPException(status_code=400, detail="HF_TOKEN not configured in Space secrets")
+        
+        logger.info(f"LLM Request: model={model}, api_base={api_base}")
+        
         client = OpenAI(api_key=api_key, base_url=api_base)
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "You are a food safety incident responder. Respond with exactly one action."},
+                {"role": "system", "content": "You are a food safety incident responder. Respond with exactly one action from: INSPECT, QUARANTINE, LIFT, RECALL, TRACE, WAIT. Include a node or batch name if needed."},
                 {"role": "user", "content": prompt.get("prompt", "")}
             ],
             temperature=0.3,
-            max_tokens=50,
+            max_tokens=100,
         )
         decision = response.choices[0].message.content.strip()
+        logger.info(f"LLM Response: {decision}")
+        
         return {"action": decision}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
+        import traceback
+        error_msg = f"LLM error: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 

@@ -1223,12 +1223,24 @@ function updateUI(obs, reward, action) {
 
   // Populate node/batch dropdowns
   const nodes = obs.nodes || [];
+  console.log('DEBUG: obs.nodes =', nodes, 'length =', nodes.length);
   const nodeSelect = document.getElementById('target-node');
   const batchSelect = document.getElementById('target-batch');
+  
+  if (!nodeSelect || !batchSelect) {
+    console.error('ERROR: target-node or target-batch select not found in DOM');
+    return;
+  }
+  
   const prevNode = nodeSelect.value;
   const prevBatch = batchSelect.value;
   nodeSelect.innerHTML = '<option value="">— select node —</option>';
   batchSelect.innerHTML = '<option value="">— select batch —</option>';
+  
+  if (nodes.length === 0) {
+    console.warn('WARNING: obs.nodes is empty! Full obs:', obs);
+  }
+  
   const seenBatches = new Set();
   nodes.forEach(n => {
     const opt = document.createElement('option');
@@ -1238,6 +1250,7 @@ function updateUI(obs, reward, action) {
     opt.textContent = `${n.node_id}${q}${r}`;
     if (opt.value === prevNode) opt.selected = true;
     nodeSelect.appendChild(opt);
+    console.log('Added node option:', opt.textContent);
     (n.batch_ids || []).forEach(bid => {
       if (!seenBatches.has(bid)) {
         seenBatches.add(bid);
@@ -1246,6 +1259,7 @@ function updateUI(obs, reward, action) {
         bopt.textContent = bid;
         if (bopt.value === prevBatch) bopt.selected = true;
         batchSelect.appendChild(bopt);
+        console.log('Added batch option:', bid);
       }
     });
   });

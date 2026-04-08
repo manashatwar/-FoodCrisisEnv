@@ -383,7 +383,10 @@ function drawGraph(obs) {
     if((n.batch_ids||[]).length) s+=`<text x="${x+6}" y="${y+46}" font-family="Inter" font-size="8" fill="rgba(100,116,139,0.3)">${n.batch_ids.length}b</text>`;
     s+=`</g>`;
   });
-  svg.innerHTML = s;
+  // Use DOMParser to properly create SVG elements with correct namespace
+  const parser = new DOMParser();
+  const tmpSvg = parser.parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${s}</svg>`, 'image/svg+xml').documentElement;
+  svg.replaceChildren(...Array.from(tmpSvg.childNodes));
 }
 
 // ── Log ──

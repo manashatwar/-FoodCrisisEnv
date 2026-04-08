@@ -172,3 +172,64 @@ async def ui_root() -> HTMLResponse:
     # Ensure it reloads files on every request to avoid caching issues during dev
     html_content = _load_html() if os.getenv("IRCE_RELOAD", "false").lower() in {"1", "true", "yes"} else _HTML
     return HTMLResponse(content=html_content, status_code=200)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix for stateless openenv HTTP bug — Create our own stateful HTTP sessions
+# ─────────────────────────────────────────────────────────────────────────────
+import uuid
+
+# Filter out the default stateless openenv-core routes
+app.routes = [r for r in app.routes if getattr(r, "path", "") not in {"/reset", "/step", "/state"}]
+
+_http_sessions = {}
+
+@app.post("/reset")
+async def session_reset(req: dict):
+    # Generate unique session for this browser tab
+    session_id = str(uuid.uuid4())
+    env = FoodCrisisEnv()
+    _http_sessions[session_id] = env
+    
+    task_id = req.get("task_id", 1)
+    seed = req.get("seed", 7)
+    obs = env.reset(task_id=task_id, seed=seed)
+    
+    ser_obs = obs.model_dump() if hasattr(obs, "model_dump") else obs.dict()
+    return {
+        "session_id": session_id,
+        "observation": ser_obs,
+        "reward": getattr(obs, "reward", 0.0),
+        "done": getattr(obs, "done", False),
+    }
+
+@app.post("/step")
+async def session_step(req: dict):
+    session_id = req.get("session_id")
+    env = _http_sessions.get(session_id)
+    if not env:
+        # Fallback if session dropped or didn't sync yet
+        env = FoodCrisisEnv()
+        env.reset(task_id=1, seed=7)
+        _http_sessions[session_id] = env
+        
+    action_dict = req.get("action", {})
+    action = FoodCrisisAction(**action_dict)
+    
+    obs = env.step(action)
+    ser_obs = obs.model_dump() if hasattr(obs, "model_dump") else obs.dict()
+    return {
+        "observation": ser_obs,
+        "reward": getattr(obs, "reward", 0.0),
+        "done": getattr(obs, "done", False),
+    }
+
+@app.get("/state")
+async def session_state(session_id: str = ""):
+    env = _http_sessions.get(session_id)
+    if not env:
+        return {"observation": {}}
+    
+    # Return the full state mapped as observation so UI can read it
+    st = env.state
+    ser_state = st.model_dump() if hasattr(st, "model_dump") else st.dict()
+    return {"observation": ser_state}

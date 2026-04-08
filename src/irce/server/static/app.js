@@ -4,6 +4,7 @@
 
 let currentTask = 1, lastState = null, episodeLog = [];
 let llmMode = 'manual', autoPlayLLM = false;
+let currentSessionId = "default"; // Auto-populated by /reset
 const labBudgetMax = {1:10,2:6,3:4};
 const recallBudgetMax = {1:100,2:60,3:40};
 const maxSteps = {1:48,2:60,3:72};
@@ -100,6 +101,7 @@ async function resetEnv() {
       body:JSON.stringify({task_id:currentTask, seed:7})
     });
     const data = await r.json();
+    if (data.session_id) currentSessionId = data.session_id; // Capture session from openenv
     updateUI(data.observation || data, null, null);
   } catch(e) { console.error('Reset failed', e); }
 }
@@ -107,7 +109,8 @@ async function resetEnv() {
 async function fetchState() {
   document.getElementById('refresh-spinner').style.display = 'inline';
   try {
-    const r = await fetch('/state');
+    const url = currentSessionId !== "default" ? `/state?session_id=${currentSessionId}` : '/state';
+    const r = await fetch(url);
     const data = await r.json();
     updateUI(data.observation || data, null, null);
   } catch(e) { console.error('Fetch failed', e); }
@@ -125,9 +128,12 @@ async function sendAction(verb, targetType) {
   }
   const actionStr = target ? `${verb} ${target}` : verb;
   try {
+    const payload = {action: {action_type: actionStr}};
+    if (currentSessionId && currentSessionId !== "default") payload.session_id = currentSessionId;
+    
     const r = await fetch('/step', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:{action_type:actionStr}})
+      body:JSON.stringify(payload)
     });
     const data = await r.json();
     const obs = data.observation || data;
@@ -150,9 +156,12 @@ async function runLLMStep() {
     const llmResp = await queryLLM(prompt);
     const actionStr = parseLLMAction(llmResp);
     statusEl.textContent = '💡 ' + actionStr;
+    const payload = {action: {action_type: actionStr}};
+    if (currentSessionId && currentSessionId !== "default") payload.session_id = currentSessionId;
+    
     const r = await fetch('/step', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:{action_type:actionStr}})
+      body:JSON.stringify(payload)
     });
     const data = await r.json();
     const obs = data.observation || data;

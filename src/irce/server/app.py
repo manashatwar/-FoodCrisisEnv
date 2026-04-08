@@ -179,7 +179,7 @@ async def ui_root() -> HTMLResponse:
 import uuid
 
 # Filter out the default stateless openenv-core routes
-app.routes = [r for r in app.routes if getattr(r, "path", "") not in {"/reset", "/step", "/state"}]
+app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") not in {"/reset", "/step", "/state"}]
 
 _http_sessions = {}
 

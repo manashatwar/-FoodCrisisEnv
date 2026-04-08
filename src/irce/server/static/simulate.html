@@ -1,0 +1,214 @@
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<!-- SIMULATION PAGE                                                     -->
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div id="page-simulate" class="page sim-page">
+
+  <!-- Toolbar -->
+  <div class="sim-toolbar">
+    <a href="#/" onclick="navigateTo('landing')" style="color:var(--text3);font-size:12px;font-weight:500;">← Home</a>
+    <div style="width:1px;height:20px;background:var(--border);margin:0 4px;"></div>
+    <span style="font-size:12px;font-weight:700;color:var(--accent);letter-spacing:1px;">SIMULATION</span>
+    <div style="flex:1;"></div>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="mode-manual" onclick="setMode('manual')">🎮 Manual</button>
+      <button class="mode-btn" id="mode-llm" onclick="setMode('llm')">🤖 LLM Agent</button>
+    </div>
+  </div>
+
+  <div class="sim-layout">
+
+    <!-- ── LEFT PANEL ── -->
+    <div class="panel">
+      <div class="panel-hdr"><h2>⬡ Mission Control</h2></div>
+      <div class="panel-body">
+
+        <!-- Task Selector -->
+        <div class="sim-card">
+          <div class="sim-card-title">Task Selection</div>
+          <div class="sim-card-body">
+            <div class="task-tabs" style="margin-bottom:10px;">
+              <button class="task-tab active" onclick="selectTask(1)">T1 Easy</button>
+              <button class="task-tab" onclick="selectTask(2)">T2 Med</button>
+              <button class="task-tab" onclick="selectTask(3)">T3 Hard</button>
+            </div>
+            <div id="task-desc" style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:10px;">
+              Single source, low noise, fast reports, generous budgets.
+            </div>
+            <button class="btn btn-primary btn-sm" style="width:100%;" onclick="resetEnv()">⟳ Reset Episode</button>
+          </div>
+        </div>
+
+        <!-- Step + Progress -->
+        <div class="sim-card">
+          <div class="sim-card-title">Episode Progress</div>
+          <div class="sim-card-body">
+            <div class="step-display">
+              <div class="step-ring">
+                <svg width="56" height="56" viewBox="0 0 56 56">
+                  <circle class="ring-bg" cx="28" cy="28" r="22"/>
+                  <circle class="ring-fill" id="progress-ring" cx="28" cy="28" r="22"
+                    stroke-dasharray="138.2" stroke-dashoffset="138.2"/>
+                </svg>
+                <div class="step-ring-label" id="progress-pct">0%</div>
+              </div>
+              <div>
+                <div style="color:var(--text3);font-size:10px;font-weight:600;letter-spacing:1px;">STEP</div>
+                <div class="step-num"><span id="step-cur">0</span></div>
+                <div class="step-max">/ <span id="step-max">48</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Resources -->
+        <div class="sim-card">
+          <div class="sim-card-title">Resources</div>
+          <div class="sim-card-body">
+            <div class="metric-row"><span class="metric-label">🔬 Lab Budget</span><span class="metric-val" id="lab-budget">—</span></div>
+            <div class="bar-bg"><div class="bar-fill bar-blue" id="lab-bar" style="width:100%"></div></div>
+            <div style="height:10px"></div>
+            <div class="metric-row"><span class="metric-label">📦 Recall Budget</span><span class="metric-val" id="recall-budget">—</span></div>
+            <div class="bar-bg"><div class="bar-fill bar-purple" id="recall-bar" style="width:100%"></div></div>
+            <div style="height:10px"></div>
+            <div class="metric-row"><span class="metric-label">👥 Public Trust</span><span class="metric-val" id="trust-val">—</span></div>
+            <div class="bar-bg"><div class="bar-fill bar-green" id="trust-bar" style="width:100%"></div></div>
+          </div>
+        </div>
+
+        <!-- Last Action -->
+        <div class="sim-card">
+          <div class="sim-card-title">Last Action Result</div>
+          <div class="sim-card-body">
+            <div id="result-flash" class="result-flash">—</div>
+            <div class="metric-row">
+              <span class="metric-label">Reward</span>
+              <span id="last-reward" style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono);">—</span>
+            </div>
+            <div class="metric-row" style="margin-top:2px;">
+              <span class="metric-label">Status</span>
+              <span id="tool-result" style="font-size:12px;color:var(--text2);font-family:var(--mono);">—</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── CENTER PANE ── -->
+    <div class="center-pane">
+      <div class="graph-toolbar">
+        <span style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;">Supply Chain</span>
+        <div style="flex:1;"></div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <span class="legend-item"><span class="legend-dot" style="background:var(--clean)"></span>Clean</span>
+          <span class="legend-item"><span class="legend-dot" style="background:var(--amber)"></span>Suspect</span>
+          <span class="legend-item"><span class="legend-dot" style="background:var(--red)"></span>Contaminated</span>
+          <span class="legend-item"><span class="legend-dot" style="background:var(--text3)"></span>Unknown</span>
+          <span class="legend-item" style="border:1px solid var(--amber);padding:1px 6px;border-radius:3px;color:var(--amber);font-size:10px;">Q</span>
+        </div>
+        <button class="btn btn-outline btn-sm" style="padding:4px 10px;font-size:10px;" onclick="fetchState()">↺ Refresh</button>
+        <span id="refresh-spinner" style="display:none;"><span class="spinner"></span></span>
+      </div>
+
+      <div id="graph-wrap" style="position:relative;">
+        <svg id="supply-graph" viewBox="0 0 800 480" preserveAspectRatio="xMidYMid meet">
+          <text x="400" y="240" text-anchor="middle" fill="#1e3a3e" font-family="Inter" font-size="14">Loading supply chain...</text>
+        </svg>
+        <div id="done-overlay">
+          <div class="done-title">EPISODE COMPLETE</div>
+          <div style="color:var(--text3);font-size:13px;letter-spacing:2px;">FINAL SCORE</div>
+          <div class="done-score" id="done-score">—</div>
+          <button class="btn btn-primary" onclick="resetEnv()">⟳ New Episode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT PANEL ── -->
+    <div class="panel">
+      <div class="panel-hdr"><h2>⬡ Operations</h2></div>
+      <div class="panel-body">
+
+        <!-- LLM Controls (shown in LLM mode) -->
+        <div id="llm-controls" style="display:none;">
+          <div class="sim-card">
+            <div class="sim-card-title">🤖 LLM Agent Control</div>
+            <div class="sim-card-body">
+              <div class="target-row">
+                <label>Mode</label>
+                <select class="sim-select" id="llm-mode-select" onchange="updateLLMMode()">
+                  <option value="llm-sample">Single Step</option>
+                  <option value="llm-auto">Auto-Play</option>
+                </select>
+              </div>
+              <button class="btn btn-primary btn-sm" id="llm-step-btn" style="width:100%;margin-top:6px;" onclick="runLLMStep()">▶ LLM Decide</button>
+              <button class="btn btn-danger btn-sm" id="llm-stop-btn" style="width:100%;margin-top:6px;display:none;" onclick="stopAutoPlay()">■ Stop</button>
+              <div class="llm-indicator" id="llm-status"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual Controls -->
+        <div id="manual-controls">
+          <div class="sim-card">
+            <div class="sim-card-title">Execute Action</div>
+            <div class="sim-card-body">
+              <div class="target-row">
+                <label>Node</label>
+                <select class="sim-select" id="target-node"><option value="">— select —</option></select>
+              </div>
+              <div class="target-row">
+                <label>Batch</label>
+                <select class="sim-select" id="target-batch"><option value="">— select —</option></select>
+              </div>
+              <div class="action-grid-sim">
+                <button class="act-btn act-inspect" onclick="sendAction('INSPECT','node')">🔬 Inspect</button>
+                <button class="act-btn act-quarantine" onclick="sendAction('QUARANTINE','node')">🚫 Quarantine</button>
+                <button class="act-btn act-lift" onclick="sendAction('LIFT','node')">✅ Lift</button>
+                <button class="act-btn act-recall" onclick="sendAction('RECALL','batch')">📦 Recall</button>
+                <button class="act-btn act-trace" onclick="sendAction('TRACE','batch')">🔍 Trace</button>
+                <button class="act-btn act-wait" onclick="sendAction('WAIT','none')">⏸ Wait</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lab Results -->
+        <div class="sim-card">
+          <div class="sim-card-title">Lab Results</div>
+          <div class="sim-card-body"><div class="pill-list" id="lab-results-pills"><span style="color:var(--text3);font-size:11px;">No results yet.</span></div></div>
+        </div>
+
+        <!-- Quarantined -->
+        <div class="sim-card">
+          <div class="sim-card-title">Quarantined Nodes</div>
+          <div class="sim-card-body"><div class="pill-list" id="quarantine-pills"><span style="color:var(--text3);font-size:11px;">None.</span></div></div>
+        </div>
+
+        <!-- Illness -->
+        <div class="sim-card">
+          <div class="sim-card-title">⚠ Illness Reports</div>
+          <div class="sim-card-body" id="illness-reports"><span style="color:var(--text3);font-size:11px;">No reports yet.</span></div>
+        </div>
+
+        <!-- Traced -->
+        <div class="sim-card">
+          <div class="sim-card-title">Traced Batches</div>
+          <div class="sim-card-body">
+            <div class="pill-list" id="traced-pills"><span style="color:var(--text3);font-size:11px;">None traced.</span></div>
+            <div id="trace-paths" style="margin-top:6px;font-size:11px;color:var(--text3);"></div>
+          </div>
+        </div>
+
+        <!-- Log -->
+        <div class="sim-card">
+          <div class="sim-card-title">Episode Log</div>
+          <div class="sim-card-body" style="padding:6px 8px;">
+            <div id="episode-log"><span style="color:var(--text3);">Awaiting first action...</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /sim-layout -->
+</div><!-- /page-simulate -->

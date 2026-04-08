@@ -1,0 +1,205 @@
+<!-- ━━ NAVBAR ━━ -->
+<nav class="navbar">
+  <div class="nav-brand">
+    <div class="nav-logo">🥬</div>
+    <div>
+      <div class="nav-title">FoodCrisisEnv</div>
+      <div class="nav-sub">OpenEnv Benchmark</div>
+    </div>
+  </div>
+  <div class="nav-links">
+    <span style="font-size:12px;color:var(--text3)"><span class="nav-dot" id="status-dot"></span><span id="status-text">CONNECTING</span></span>
+    <a class="nav-link" href="#/" onclick="navigateTo('landing')">Home</a>
+    <a class="nav-link" href="#/simulate" onclick="navigateTo('simulate')" style="border-color:var(--accent);color:var(--accent)">▶ Simulate</a>
+    <a class="nav-link" href="/docs" target="_blank">API</a>
+  </div>
+</nav>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<!-- LANDING PAGE                                                        -->
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div id="page-landing" class="page landing active">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-bg"><div class="hero-grid"></div></div>
+    <div class="hero-content">
+      <div class="hero-badge">🔬 OpenEnv Benchmark · Food Safety</div>
+      <h1>Trace. Contain.<br><span class="highlight">Save Lives.</span></h1>
+      <p class="hero-desc">An AI benchmark where agents act as food safety investigators — tracing contaminated food through a live supply chain under noisy sensors, delayed reports, and limited budgets.</p>
+      <div class="hero-actions">
+        <button class="btn btn-primary" onclick="navigateTo('simulate')">🚀 Launch Simulation</button>
+        <a class="btn btn-outline" href="/docs" target="_blank">📡 API Documentation</a>
+      </div>
+      <div class="chain-visual">
+        <span class="chain-node cn-farm">🌾 Farm</span>
+        <span class="chain-arrow">→</span>
+        <span class="chain-node cn-proc">⚙ Processing</span>
+        <span class="chain-arrow">→</span>
+        <span class="chain-node cn-ware">📦 Warehouse</span>
+        <span class="chain-arrow">→</span>
+        <span class="chain-node cn-ret">🏪 Retailer</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT WE BUILT -->
+  <section class="section">
+    <div class="section-label">What We Built</div>
+    <div class="section-title">A Real Operations Benchmark</div>
+    <div class="section-desc">Not a toy control task — FoodCrisisEnv models real FDA-style supply chain outbreak response with partial observability, delayed signals, and budget trade-offs.</div>
+    <div class="feat-grid">
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(34,197,94,.12)">🧪</div>
+        <h3>Noisy Observations</h3>
+        <p>True contamination is hidden. Agents only see noisy sensor readings that can spike on clean nodes and miss real sources.</p>
+      </div>
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(239,68,68,.12)">⏱</div>
+        <h3>Delayed Illness Reports</h3>
+        <p>Consumer illness reports arrive hours after exposure. By the time signals are obvious, contamination may already be downstream.</p>
+      </div>
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(56,189,248,.12)">💰</div>
+        <h3>Limited Resources</h3>
+        <p>Finite lab tests and recall budget — inspecting every node or recalling every batch is not an option.</p>
+      </div>
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(168,85,247,.12)">👥</div>
+        <h3>Public Trust</h3>
+        <p>False quarantines and unnecessary alerts damage trust. Overreaction has real cost just like underreaction.</p>
+      </div>
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(245,158,11,.12)">🤖</div>
+        <h3>LLM-Ready</h3>
+        <p>Every observation includes a natural language summary. Drop in any LLM as an agent with our prompt template.</p>
+      </div>
+      <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(34,197,94,.12)">📊</div>
+        <h3>Deterministic Grading</h3>
+        <p>Episodes scored on containment, precision, speed, and trust preservation. Reproducible with seed control.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="section">
+    <div class="section-label">How It Works</div>
+    <div class="section-title">Three Steps to Contain</div>
+    <div class="how-grid">
+      <div class="how-step glass">
+        <div class="how-num">01</div>
+        <h3>Reset & Observe</h3>
+        <p>Start an episode. The supply chain spawns with hidden contamination sources and batches already moving downstream.</p>
+      </div>
+      <div class="how-step glass">
+        <div class="how-num">02</div>
+        <h3>Decide & Act</h3>
+        <p>Choose from 7 actions — INSPECT, QUARANTINE, LIFT, RECALL, TRACE, ALERT, or WAIT — each with real consequences.</p>
+      </div>
+      <div class="how-step glass">
+        <div class="how-num">03</div>
+        <h3>Contain & Score</h3>
+        <p>Find the source, block the spread, recall contaminated batches. Your score reflects containment, precision, speed, and trust.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ACTION SHOWCASE -->
+  <section class="section">
+    <div class="section-label">Agent Toolbox</div>
+    <div class="section-title">7 Actions, Real Consequences</div>
+    <div class="section-desc">Every action has a cost. Finding the outbreak source is worth 4x more than chasing downstream symptoms.</div>
+    <div class="action-showcase">
+      <div class="action-card glass"><div class="emoji">🔬</div><h4>INSPECT</h4><p>Lab test a node. Exact contamination result, costs 1 lab token.</p></div>
+      <div class="action-card glass"><div class="emoji">🚫</div><h4>QUARANTINE</h4><p>Block outbound spread from node. +4.0 for source, −2.0 if wrong.</p></div>
+      <div class="action-card glass"><div class="emoji">✅</div><h4>LIFT</h4><p>Remove quarantine, restore flow. Builds trust if node was clean.</p></div>
+      <div class="action-card glass"><div class="emoji">📦</div><h4>RECALL</h4><p>Remove batch from chain. +1.5 for contaminated, −1.0 if clean.</p></div>
+      <div class="action-card glass"><div class="emoji">🔍</div><h4>TRACE</h4><p>Trace batch path upstream. Low-cost intel to find the true source.</p></div>
+      <div class="action-card glass"><div class="emoji">⚠️</div><h4>ALERT</h4><p>Retailer warning. Slows exposure but permanently reduces trust.</p></div>
+      <div class="action-card glass"><div class="emoji">⏸</div><h4>WAIT</h4><p>Let the system evolve. Useful when waiting for lab results.</p></div>
+    </div>
+  </section>
+
+  <!-- TASKS -->
+  <section class="section">
+    <div class="section-label">Task Suite</div>
+    <div class="section-title">Three Difficulty Levels</div>
+    <div class="feat-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="glass" style="padding:28px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <span class="tag tag-green">Easy</span><span style="color:var(--text3);font-size:12px;">Task 1</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+          Single source · Low noise (0.05) · 1-step illness delay · 10 lab tests · 100 recall budget · 48 steps
+        </div>
+      </div>
+      <div class="glass" style="padding:28px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <span class="tag tag-amber">Medium</span><span style="color:var(--text3);font-size:12px;">Task 2</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+          Multi-source · Noisy sensors (0.15) · 3-step delay · 6 lab tests · 60 recall budget · 60 steps
+        </div>
+      </div>
+      <div class="glass" style="padding:28px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <span class="tag tag-red">Hard</span><span style="color:var(--text3);font-size:12px;">Task 3</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+          Adversarial spikes · Re-seeding · 5-step delay · 4 lab tests · 40 recall budget · 72 steps
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- API + CODE -->
+  <section class="section">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;">
+      <div>
+        <div class="section-label">API Endpoints</div>
+        <div class="section-title" style="font-size:24px;">Plug in Your Agent</div>
+        <div class="glass" style="overflow:hidden;margin-top:20px;">
+          <table class="api-table">
+            <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="api-method api-get">GET</span></td><td class="api-path">/health</td><td style="color:var(--text3)">Liveness check</td></tr>
+              <tr><td><span class="api-method api-post">POST</span></td><td class="api-path">/reset</td><td style="color:var(--text3)">Start new episode</td></tr>
+              <tr><td><span class="api-method api-post">POST</span></td><td class="api-path">/step</td><td style="color:var(--text3)">Execute one action</td></tr>
+              <tr><td><span class="api-method api-get">GET</span></td><td class="api-path">/state</td><td style="color:var(--text3)">Full observation</td></tr>
+              <tr><td><span class="api-method api-get">GET</span></td><td class="api-path">/docs</td><td style="color:var(--text3)">Swagger UI</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="section-label">Quick Start</div>
+        <div class="section-title" style="font-size:24px;">5 Lines of Code</div>
+        <div class="code-wrap" style="margin-top:20px;">
+          <div class="code-header"><span class="code-lang">Python</span></div>
+          <div class="code-body"><span class="ck">from</span> irce.client <span class="ck">import</span> FoodCrisisEnvClient
+<span class="ck">from</span> irce.models <span class="ck">import</span> FoodCrisisAction
+
+<span class="ck">with</span> <span class="cf">FoodCrisisEnvClient</span>(BASE).<span class="cf">sync</span>() <span class="ck">as</span> env:
+    obs = env.<span class="cf">reset</span>(task_id=<span class="cn">1</span>)
+    <span class="ck">while not</span> obs.done:
+        obs = env.<span class="cf">step</span>(<span class="cf">FoodCrisisAction</span>(
+            action_type=<span class="cs">"TRACE batch_001"</span>
+        ))</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section" style="text-align:center;padding-bottom:40px;">
+    <div class="section-title">Ready to Investigate?</div>
+    <p style="color:var(--text2);margin-bottom:28px;font-size:16px;">Launch the interactive simulation — control the environment manually or let an LLM agent decide.</p>
+    <button class="btn btn-primary" style="font-size:16px;padding:16px 40px;" onclick="navigateTo('simulate')">🚀 Launch Simulation</button>
+  </section>
+
+  <footer class="footer">
+    <div>FoodCrisisEnv · OpenEnv Benchmark · MIT License</div>
+    <div style="margin-top:8px;"><a href="/docs">API Docs</a><a href="/redoc">ReDoc</a><a href="#/simulate" onclick="navigateTo('simulate')">Simulation</a></div>
+  </footer>
+</div>

@@ -175,7 +175,7 @@ a { color:var(--accent); text-decoration:none; }
 .step-ring { position:relative; display:inline-flex; align-items:center; justify-content:center; }
 .step-ring svg { transform:rotate(-90deg); }
 .step-ring .ring-bg { fill:none; stroke:rgba(255,255,255,.06); stroke-width:4; }
-.step-ring .ring-fill { fill:none; stroke:var(--accent); stroke-width:4; stroke-linecap:round; transition:stroke-dashoffset .5s ease; }
+.step-ring .ring-fill { fill:none; stroke:var(--accent); stroke-width:4; stroke-linecap:round; transition: stroke-dashoffset 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .step-ring-label { position:absolute; font-family:var(--mono); font-size:13px; font-weight:700; color:var(--text); }
 .step-num { font-family:var(--mono); font-size:28px; font-weight:800; color:var(--accent); line-height:1; }
 .step-max { font-size:12px; color:var(--text3); font-family:var(--mono); }

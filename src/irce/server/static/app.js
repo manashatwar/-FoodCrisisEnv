@@ -215,9 +215,12 @@ function updateUI(obs, reward, action) {
   const pct = Math.round((step/mx)*100);
 
   document.getElementById('step-cur').textContent = step;
+  document.getElementById('step-max').textContent = mx;
   document.getElementById('progress-pct').textContent = pct+'%';
-  const circ = 2*Math.PI*22;
-  document.getElementById('progress-ring').style.strokeDashoffset = circ-(circ*pct/100);
+  
+  const circ = 138.2; // 2 * PI * 22
+  const offset = circ - (circ * pct / 100);
+  document.getElementById('progress-ring').style.strokeDashoffset = offset;
 
   const lb = obs.lab_budget ?? 0, rb = obs.recall_budget ?? 0;
   const lbMax = labBudgetMax[currentTask], rbMax = recallBudgetMax[currentTask];

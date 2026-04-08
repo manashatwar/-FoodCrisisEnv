@@ -188,9 +188,9 @@ Each node stores:
 `TRACE` is a low-cost information action modelling real food-traceability workflows. It returns the complete path a batch took through the supply chain and identifies the origin node.
 
 - **Cost**: -0.1 reward
-- **Benefit**: eliminates uncertainty about batch origin and propagation path
-- **Use case**: disambiguate between false signals and real source contamination
-- **Real-world mapping**: corresponds to supplier records and batch traceability data under FSMA 204
+- **Benefit**: eliminates uncertainty about batch origin and propagation path.
+- **Use case**: disambiguate between false signals and real source contamination.
+- **Real-world mapping**: corresponds to supplier records and batch traceability data under FSMA 204.
 
 ---
 
@@ -374,4 +374,4 @@ MODEL_NAME=llama-3.1-8b-instant
 
 ## License
 
-MIT
+MIT.

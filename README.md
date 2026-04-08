@@ -94,6 +94,77 @@ curl https://<your-space>.hf.space/state
 
 ---
 
+## 🎮 Interactive Web UI Guide
+
+The **Incident Command Dashboard** provides a visual interface for manual control and monitoring. Here's what each panel does:
+
+### Left Panel: Mission Control
+
+| Button/Control | What It Does |
+|---|---|
+| **T1 Easy / T2 Med / T3 Hard** | Select difficulty (Easy: fast reports, clean signal; Medium: more noise; Hard: very noisy, delayed reports) |
+| **⟳ Reset Episode** | Start a fresh episode with the selected task difficulty |
+| **Progress Ring** | Shows current step / total steps (0-48) and completion % |
+| **🔬 Lab Budget** | Remaining lab tests (0-10). Each INSPECT uses 1. Green bar shows available. |
+| **📦 Recall Budget** | Remaining recall capacity (0-100). Each RECALL uses allocated budget. Purple bar shows available. |
+| **👥 Public Trust** | Current public confidence (0-100%). Unnecessary quarantines reduce this. Green bar. |
+| **Total Mission Score** | Cumulative reward across all actions (higher is better) |
+| **Latest Reward** | Feedback from your last action (positive = good decision, negative = costly mistake) |
+
+### Center Pane: Supply Chain Graph
+
+- **Node colors**: Green (clean), Amber (suspect: sensor ≥ 0.4), Red (contaminated), Gray (unknown)
+- **Icons**: ✓ (clean lab result), ☣ (contaminated), ⚠ (quarantined), ! (high sensor reading ≥ 0.7)
+- **Number suffix** (e.g., "3b"): Shows batch count at this node
+- **Dashed border**: Node is quarantined
+- **Red arrows**: Contamination flow detected
+- **Faded arrows**: Quarantined paths (blocked)
+
+Click **↺ Refresh** to force an immediate state update (auto-refreshes every 5s).
+
+### Right Panel: Operations
+
+#### Manual Control Mode (default)
+
+1. **Select Node**: Dropdown lists all visible `farm_a`, `farm_b`, etc.
+2. **Action Buttons**:
+   - **INSPECT** — Run lab test on selected node (costs 1 lab budget). Result appears in "Lab Results" pills.
+   - **TRACE** — Get batch traceback for selected node (free). Shows path from farm to this location.
+   - **QUARANTINE** — Block node from receiving/sending food (costs up to 10 recall budget). Dashed border appears on graph.
+   - **LIFT** — Remove quarantine from node. Frees recall budget.
+   - **RECALL** — Order all batches from node back to farms (costs significant recall budget).
+   - **WAIT** — Do nothing this step. Contamination spreads, reports arrive, sensor readings update.
+
+3. **Example Workflow**:
+   ```
+   Step 1: WAIT (watch for illness reports at retailers)
+   Step 2: WAIT (retailer_r1 shows illness)
+   Step 3: Select retailer_r1 → TRACE (learn which farms supply it)
+   Step 4: Select batch_001 → INSPECT (confirm contamination)
+   Step 5: Select farm_a → QUARANTINE (stop spread)
+   Step 6: RECALL farm_a (pull all batches from market)
+   ```
+
+#### LLM Agent Mode
+
+- Click **🤖 LLM Agent** tab to switch
+- Select mode: "Single Step" or "Auto-Play"
+- **Single Step**: Agent makes one decision per step (you click each time)
+- **Auto-Play**: Agent runs continuously until episode ends
+- Agent uses Groq LLM (configured in Space Secrets) to decide actions based on current state
+
+### Panel Readouts
+
+| Panel | Shows |
+|---|---|
+| **Lab Results Pills** | All test outcomes so far (green = clean, red = contaminated) |
+| **Quarantine Pills** | All currently quarantined nodes (yellow 🚫) |
+| **Illness Reports** | Which retailers have reports, count of cases |
+| **Traced Paths** | Batch lineage showing: `farm → processing → warehouse → retailer` |
+| **Episode Log** | Last 30 actions with step, action type, and immediate reward |
+
+---
+
 ## Why this benchmark exists
 
 Food recalls are not just detection problems. They are decision problems under uncertainty.

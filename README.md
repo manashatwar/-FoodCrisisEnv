@@ -30,10 +30,10 @@ This is designed as a real operations benchmark, not a toy control task. The set
 
 Visit the Space URL to open the **Incident Command Dashboard** — a fully interactive web UI where you can:
 
-- 🗺️ Visualize the live supply chain graph with real-time sensor readings and contamination status
-- 🎮 Execute actions manually (INSPECT, QUARANTINE, LIFT, RECALL, TRACE, WAIT)
-- 📊 Monitor lab budgets, recall budgets, public trust, and illness reports
-- 🔄 Select Task 1 / 2 / 3 difficulty and reset episodes instantly
+- 🗺️ Visualize the live supply chain graph with real-time sensor readings and contamination status.
+- 🎮 Execute actions manually (INSPECT, QUARANTINE, LIFT, RECALL, TRACE, WAIT).
+- 📊 Monitor lab budgets, recall budgets, public trust, and illness reports.
+- 🔄 Select Task 1 / 2 / 3 difficulty and reset episodes instantly.
 
 ---
 

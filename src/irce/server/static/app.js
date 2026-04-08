@@ -4,7 +4,8 @@
 
 let currentTask = 1, lastState = null, episodeLog = [];
 let llmMode = 'manual', autoPlayLLM = false;
-let currentSessionId = "default"; // Auto-populated by /reset
+let currentSessionId = "default"; 
+let totalReward = 0; // Running total for the session
 const labBudgetMax = {1:10,2:6,3:4};
 const recallBudgetMax = {1:100,2:60,3:40};
 const maxSteps = {1:48,2:60,3:72};
@@ -101,8 +102,9 @@ async function resetEnv() {
       body:JSON.stringify({task_id:currentTask, seed:7})
     });
     const data = await r.json();
-    if (data.session_id) currentSessionId = data.session_id; // Capture session from openenv
-    updateUI(data.observation || data, null, null);
+    if (data.session_id) currentSessionId = data.session_id; 
+    totalReward = 0; // Reset total on new episode
+    updateUI(data.observation || data, 0, null);
   } catch(e) { console.error('Reset failed', e); }
 }
 
@@ -234,12 +236,33 @@ function updateUI(obs, reward, action) {
   tb.style.background = trust<0.5?'var(--red)':trust<0.75?'var(--amber)':'var(--accent)';
 
   if (reward !== null && reward !== undefined) {
+    totalReward += reward;
     const rEl = document.getElementById('last-reward');
+    const totEl = document.getElementById('total-reward');
+    
     rEl.textContent = (reward>=0?'+':'')+reward.toFixed(2);
     rEl.style.color = reward>0?'var(--clean)':reward<0?'var(--red)':'var(--text3)';
+    
+    totEl.textContent = (totalReward>=0?'+':'')+totalReward.toFixed(2);
+    totEl.style.color = totalReward>=0?'var(--accent)':'var(--red)';
   }
+  
   if (obs.tool_result) {
-    document.getElementById('tool-result').textContent = obs.tool_result;
+    const trEl = document.getElementById('tool-result');
+    trEl.textContent = obs.tool_result;
+    
+    // Outcome colors
+    if (obs.tool_result === 'SUCCESS') {
+      trEl.style.background = 'rgba(34,197,94,0.15)';
+      trEl.style.color = 'var(--clean)';
+    } else if (obs.tool_result === 'ERROR') {
+      trEl.style.background = 'rgba(239,68,68,0.15)';
+      trEl.style.color = 'var(--red)';
+    } else {
+      trEl.style.background = 'rgba(245,158,11,0.15)';
+      trEl.style.color = 'var(--amber)';
+    }
+
     showFlash(obs.natural_language_summary ? obs.natural_language_summary.split('.')[0]+'.' : obs.tool_result,
       obs.tool_result==='SUCCESS'?'success':obs.tool_result==='ERROR'?'error':'ambig');
   }

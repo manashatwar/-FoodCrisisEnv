@@ -76,6 +76,16 @@ _HTML = _load_html()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Health Check Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for monitoring and hackathon validation."""
+    return {"status": "ok"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # LLM Endpoint — Call Groq model for decisions
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -184,7 +194,11 @@ app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") not 
 _http_sessions = {}
 
 @app.post("/reset")
-async def session_reset(req: dict):
+async def session_reset(req: dict = None):
+    # Handle empty body or missing fields
+    if req is None:
+        req = {}
+    
     # Generate unique session for this browser tab
     session_id = str(uuid.uuid4())
     env = FoodCrisisEnv()
@@ -203,7 +217,11 @@ async def session_reset(req: dict):
     }
 
 @app.post("/step")
-async def session_step(req: dict):
+async def session_step(req: dict = None):
+    # Handle empty body or missing fields
+    if req is None:
+        req = {}
+    
     session_id = req.get("session_id")
     env = _http_sessions.get(session_id)
     if not env:

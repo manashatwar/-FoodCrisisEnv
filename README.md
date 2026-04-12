@@ -35,7 +35,7 @@ Visit the Space URL to open the **Incident Command Dashboard** — a fully inter
 - 📊 Monitor lab budgets, recall budgets, public trust, and illness reports.
 - 🔄 Select Task 1 / 2 / 3 difficulty and reset episodes instantly.
 
----
+
 
 ## 🔌 Connect Your Agent
 
@@ -58,7 +58,7 @@ Or install the client directly from this Space:
 pip install git+https://huggingface.co/spaces/<username>/foodcrisisenv
 ```
 
----
+
 
 ## 📡 API Endpoints
 

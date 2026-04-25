@@ -47,40 +47,40 @@ MAX_CONSECUTIVE_UNUSABLE_STEPS = int(os.getenv("MAX_CONSECUTIVE_UNUSABLE_STEPS",
 # Rate limiting: 2.2s between calls = ~27 calls/min, optimized for Groq free tier (30 req/min limit)
 # Provides balanced throughput (~27 calls/min) with comfortable safety margin under 30 req/min.
 LLM_RATE_LIMIT_SLEEP = float(os.getenv("LLM_RATE_LIMIT_SLEEP", "1.2"))
+ENABLE_DETERMINISTIC_FALLBACK = os.getenv("ENABLE_DETERMINISTIC_FALLBACK", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 
-SYSTEM_PROMPT = """You are a food safety investigator. Output exactly one action per step. No explanation. No markdown.
+SYSTEM_PROMPT = """You are a food safety investigator. Output EXACTLY ONE action. ONE LINE ONLY. No explanation. No markdown. No extra text.
 
 Supply chain: farm -> processing -> warehouse -> retailer
 Contamination starts at source farms and spreads downstream each step.
 
-PRIORITY ORDER — check top to bottom, do the FIRST that applies:
+VALID ACTIONS (copy-paste format EXACTLY):
+WAIT
+TRACE farm_a_batch_001
+INSPECT farm_a
+QUARANTINE farm_a
+LIFT farm_a
+ALERT retailer_r1
+RECALL farm_a_batch_001
 
-1. LIFT <node>        if lab_results[node]="clean" AND node is quarantined
-2. QUARANTINE <node>  if lab_results[node]="contaminated" AND node NOT quarantined (farms first, +4.0 reward)
-3. INSPECT <node>     if node has high sensor reading AND not in lab_results AND lab_budget > 0
-4. TRACE <batch_id>   if traceable_batch_ids is not empty (pick highest-risk batch; finds source cheaply)
-5. RECALL <batch_id>  if contaminated batch at retailer AND recall_budget >= 10
-6. ALERT <retailer>   if retailer has illness reports AND no quarantine AND recall_budget low (use sparingly)
-7. WAIT               if none of the above apply
+PRIORITY — first that applies:
+1. LIFT node      if lab_results[node]="clean" AND quarantined
+2. QUARANTINE node  if lab_results[node]="contaminated" AND NOT quarantined
+3. INSPECT node   if node has high sensor AND not tested AND lab_budget > 0
+4. TRACE batch_id if batch in traceable_batch_ids
+5. RECALL batch_id if batch_id in recallable_batch_ids
+6. ALERT retailer_id if retailer has illness reports
+7. WAIT           if none apply
 
-HARD RULES — never break:
-- TRACE only batches listed in traceable_batch_ids (untraced batches at nodes)
-- Never TRACE a batch already in traced_batches
-- Never TRACE the same batch as your previous action
-- Never INSPECT a node already in lab_results or pending_inspections
-- Never QUARANTINE an already-quarantined node
-- Never LIFT a node that is not quarantined
-- Never ALERT a non-retailer node
-- RECALL only batches listed in recallable_batch_ids
-
-Output format — exactly one line, nothing else:
-TRACE <batch_id>
-INSPECT <node_id>
-QUARANTINE <node_id>
-LIFT <node_id>
-RECALL <batch_id>
-ALERT <node_id>
-WAIT"""
+MUST-FOLLOW RULES:
+- Output ONE action ONLY. One line.
+- Valid node_id formats: farm_a, farm_b, processing_p1, warehouse_w1, retailer_r1, retailer_r2, etc.
+- Valid batch_id format: farm_a_batch_001 (with underscore, with leading zeros)
+- Never output node ids with typos or extra characters
+- Never output ALERT <farm> or ALERT <processing> — ALERT ONLY for retailer_rX
+- If uncertain, output WAIT"""
  
 RETRY_USER_PROMPT = """Invalid action. Output ONLY one valid action. One line. No explanation.
 
@@ -310,22 +310,123 @@ def build_user_prompt(step: int, observation: FoodCrisisObservation, history: Li
     )
 
 
+class LocalModelClient:
+    """Wrapper for local HuggingFace models mimicking OpenAI API."""
+    def __init__(self, model_name: str, lora_path: str = None):
+        self.model_name = model_name
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            import torch
+            self.torch = torch
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name, 
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                device_map="auto"
+            )
+            
+            # Load LoRA if provided
+            if lora_path:
+                from peft import PeftModel
+                self.model = PeftModel.from_pretrained(self.model, lora_path)
+                print(f"Loaded LoRA adapter from: {lora_path}", file=sys.stderr)
+            
+            self.model.eval()
+        except Exception as exc:
+            raise SystemExit(f"Failed to load local model '{model_name}': {exc}") from exc
+    
+    def chat_completions(self):
+        """Return an object with create method for compatibility."""
+        return self
+    
+    def create(self, model: str, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 32, **kwargs):
+        """Generate completion from local model."""
+        try:
+            try:
+                local_token_cap = int(os.getenv("LOCAL_MAX_NEW_TOKENS", "16"))
+            except ValueError:
+                local_token_cap = 16
+            local_max_tokens = max(1, min(int(max_tokens), local_token_cap))
+            
+            # Get device before inference
+            model_device = next(self.model.parameters()).device
+            
+            try:
+                inputs = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                )
+            except (AttributeError, TypeError):
+                prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages)
+                prompt += "\n\nASSISTANT:\n"
+                inputs = self.tokenizer(prompt, return_tensors="pt")
+
+            # Move all inputs to model device
+            inputs = {key: value.to(model_device) for key, value in inputs.items()}
+            prompt_length = inputs["input_ids"].shape[-1]
+            
+            with self.torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=local_max_tokens,
+                    do_sample=False,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
+            
+            generated_tokens = outputs[0][prompt_length:]
+            response_text = self.tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+            
+            # Create a fake completion object
+            class CompletionChoice:
+                def __init__(self, text):
+                    self.message = type('Message', (), {'content': text})()
+            
+            class Completion:
+                def __init__(self, text):
+                    self.choices = [CompletionChoice(text)]
+            
+            return Completion(response_text)
+        except Exception as exc:
+            raise RuntimeError(f"Local model inference failed: {exc}") from exc
+
+
 def build_openai_client() -> tuple[Any, str]:
     api_key = (os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "").strip()
-    base_url = (os.getenv("API_BASE_URL") or DEFAULT_API_BASE_URL).strip()
+    
+    # Check if API_BASE_URL was explicitly set (even to empty)
+    api_base_url_env = os.getenv("API_BASE_URL")
+    if api_base_url_env is not None:
+        base_url = api_base_url_env.strip()
+    else:
+        base_url = DEFAULT_API_BASE_URL
+    
     model_name = (os.getenv("MODEL_NAME") or DEFAULT_MODEL_NAME).strip()
+    lora_path = os.getenv("LORA_PATH", "").strip()
 
-    if not api_key:
-        raise SystemExit("Missing HF_TOKEN in environment configuration.")
     if not model_name:
         raise SystemExit("Missing MODEL_NAME in environment configuration.")
 
-    try:
-        from openai import OpenAI
-    except Exception as exc:
-        raise SystemExit(f"OpenAI SDK import failed: {exc}") from exc
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    # Use local model if:
+    # 1. LORA_PATH is set
+    # 2. API_BASE_URL is explicitly empty AND model has "/"  (HuggingFace model format)
+    use_local = lora_path or (not base_url and "/" in model_name)
+    
+    if use_local:
+        print(f"🔹 Loading local model: {model_name}" + (f" + LoRA: {lora_path}" if lora_path else ""), file=sys.stderr)
+        client = LocalModelClient(model_name, lora_path=lora_path)
+    else:
+        # Use OpenAI/Groq API - require API key
+        if not api_key:
+            raise SystemExit("Missing HF_TOKEN or OPENAI_API_KEY in environment configuration.")
+        try:
+            from openai import OpenAI
+        except Exception as exc:
+            raise SystemExit(f"OpenAI SDK import failed: {exc}") from exc
+        print(f"🔹 Using API model: {model_name}", file=sys.stderr)
+        client = OpenAI(api_key=api_key, base_url=base_url)
+    
     return client, model_name
 
 
@@ -368,6 +469,20 @@ def strip_outer_quotes(text: str) -> str:
     return stripped
 
 
+def clean_candidate_action_text(text: str) -> str:
+    cleaned = strip_outer_quotes(text.strip())
+    cleaned = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", cleaned)
+    cleaned = re.sub(r"^`{3,}\s*(?:python|json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*`{3,}$", "", cleaned)
+    cleaned = re.sub(
+        r"^(?:final\s+action|final\s+output|final\s+answer|action|command|output|response)\s*[:=]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
 def candidate_texts_from_response(response_text: str) -> List[str]:
     candidates: List[str] = []
     seen: set = set()
@@ -375,7 +490,9 @@ def candidate_texts_from_response(response_text: str) -> List[str]:
     def add(candidate: Optional[str]) -> None:
         if not candidate:
             return
-        normalized = candidate.strip()
+        # Try to fix incomplete action verbs before normalizing
+        fixed = _fix_incomplete_verb(candidate)
+        normalized = clean_candidate_action_text(fixed)
         if not normalized or normalized in seen:
             return
         seen.add(normalized)
@@ -386,6 +503,9 @@ def candidate_texts_from_response(response_text: str) -> List[str]:
     first_line = raw.splitlines()[0].strip() if raw else ""
     add(first_line)
     add(strip_outer_quotes(first_line))
+
+    for line in raw.splitlines():
+        add(line)
 
     try:
         payload = json.loads(raw)
@@ -399,46 +519,211 @@ def candidate_texts_from_response(response_text: str) -> List[str]:
     return candidates
 
 
+def _fix_incomplete_verb(text: str) -> str:
+    """Fix incomplete action verbs like TRAC->TRACE, QUARANTINE->QUARANTINE."""
+    verbs = ["TRACE", "INSPECT", "QUARANTINE", "LIFT", "RECALL", "ALERT", "WAIT"]
+    
+    for line in text.split('\n'):
+        line_stripped = line.strip().upper()
+        for verb in verbs:
+            # Check if line starts with incomplete verb
+            if line_stripped.startswith(verb[:3]) and not line_stripped.startswith(verb):
+                # Try to match pattern
+                rest = line_stripped[len(verb[:3]):]
+                # If it looks like the start of the verb, complete it
+                if verb.startswith(line_stripped.split()[0]) if line_stripped.split() else False:
+                    # Replace the partial verb with the full verb
+                    return text.replace(line.split()[0], verb, 1)
+    
+    # More aggressive fix for common patterns
+    replacements = [
+        ("TRAC ", "TRACE "),
+        ("TRAP ", "TRACE "),
+        ("QUARANT ", "QUARANTINE "),
+        ("INSPEC ", "INSPECT "),
+        ("REALL ", "RECALL "),
+        ("LIFF ", "LIFT "),
+        ("ALRT ", "ALERT "),
+    ]
+    result = text
+    for old, new in replacements:
+        result = result.replace(old, new)
+    
+    return result
+
+
+def extract_explicit_target(text: str) -> str:
+    """Normalize targets like `batch_id=farm_a_batch_001` to just the ID."""
+    match = re.search(r"\b(?:batch_id|node_id|target)\s*=\s*([A-Za-z0-9_\-]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return text
+
+
+def next_traceable_batch_for_target(target: str, observation: FoodCrisisObservation) -> Optional[str]:
+    """Find a valid TRACE batch matching the model's intended node/batch target."""
+    traceable = traceable_batch_ids(observation)
+    if not traceable:
+        return None
+
+    normalized_target = target.strip().lower()
+    if normalized_target in traceable:
+        return normalized_target
+
+    if "_batch_" in normalized_target:
+        origin = normalized_target.split("_batch_", 1)[0]
+    else:
+        origin = normalized_target
+
+    for batch_id in traceable:
+        if batch_id.startswith(f"{origin}_batch_"):
+            return batch_id
+
+    return traceable[0]
+
+
+def fuzzy_match_node_id(target: str, node_lookup: dict) -> Optional[str]:
+    """Fuzzy match a node ID to handle typos like 'retailedicer_r1' -> 'retailer_r1'."""
+    from difflib import get_close_matches
+    
+    # Exact match first
+    if target in node_lookup:
+        return target
+    
+    # Common typo: extra characters inserted
+    # Try removing common character runs
+    for char in "edicierdcatil":
+        for i in range(1, 4):
+            fixed = target.replace(char * i, char)
+            if fixed != target and fixed in node_lookup:
+                return fixed
+    
+    # Fuzzy match with cutoff
+    matches = get_close_matches(target, node_lookup.keys(), n=1, cutoff=0.8)
+    return matches[0] if matches else None
+
+
 def parse_candidate_action(candidate: str, observation: FoodCrisisObservation) -> Optional[str]:
-    first_line = strip_outer_quotes(candidate.splitlines()[0].strip())
+    first_line = clean_candidate_action_text(candidate.splitlines()[0].strip())
     text = normalize_single_line(first_line)
     if not text:
         return None
+    text = re.sub(
+        r"\b(?:batch_id|node_id|target)\s*=\s*([A-Za-z0-9_\-]+)",
+        r"\1",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-    match = ACTION_PATTERN.fullmatch(text)
+    match = re.match(
+        r"^(INSPECT|QUARANTINE|LIFT|RECALL|TRACE|ALERT|WAIT)\b"
+        r"(?:\s+([A-Za-z0-9_\-<>]+))?",
+        text,
+        re.IGNORECASE,
+    )
     if match is None:
-        search_match = re.search(
-            r"\b(INSPECT|QUARANTINE|LIFT|RECALL|TRACE|ALERT|WAIT)\b(?:\s+([A-Za-z0-9_\-]+))?",
-            text, re.IGNORECASE,
-        )
-        if search_match is None:
-            return None
-        verb = search_match.group(1).upper()
-        target = strip_outer_quotes(search_match.group(2) or "")
+        return None
+
+    verb = match.group(1).upper()
+    target = strip_outer_quotes(match.group(2) or "")
+    if target:
+        target = extract_explicit_target(target)
     else:
-        verb = match.group(1).upper()
-        target = strip_outer_quotes(match.group(2) or "")
+        explicit_target = extract_explicit_target(text)
+        if explicit_target != text:
+            target = explicit_target
 
     target = normalize_single_line(target)
 
     if verb == "WAIT":
-        return "WAIT" if not target else None
+        return "WAIT"
     if not target:
         return None
+    if target.lower() in {"batch_id", "node_id", "target"}:
+        debug_to_stderr(f"ACTION_REPAIR: {verb} {target} -> WAIT (placeholder target)")
+        return "WAIT"
+    if any(marker in target for marker in ("<", ">", "{", "}")):
+        debug_to_stderr(f"ACTION_REPAIR: {verb} {target} -> WAIT (placeholder target)")
+        return "WAIT"
 
     normalized_target = target.lower()
     node_lookup = {node.node_id.lower(): node for node in observation.nodes}
     trace_lookup = set(visible_batch_ids(observation))       # untraced batches only
     recall_lookup = set(recallable_batch_ids(observation))   # all active batches at nodes
+    pending_nodes = set(extract_pending_inspection_nodes(observation))
+    known_results = {node_id.lower(): result for node_id, result in observation.lab_results.items()}
+
+    # Try fuzzy matching for misspelled node IDs
+    fuzzy_result = fuzzy_match_node_id(normalized_target, node_lookup)
+    if fuzzy_result and fuzzy_result != normalized_target:
+        debug_to_stderr(f"ACTION_REPAIR: {verb} {normalized_target} -> {verb} {fuzzy_result} (typo correction)")
+        normalized_target = fuzzy_result
+
+    if normalized_target.startswith("retail_"):
+        retailer_target = normalized_target.replace("retail_", "retailer_", 1)
+        if retailer_target in node_lookup:
+            debug_to_stderr(f"ACTION_REPAIR: {verb} {normalized_target} -> {verb} {retailer_target} (retailer alias)")
+            normalized_target = retailer_target
+
+    if normalized_target not in node_lookup:
+        batch_origin = normalized_target.split("_batch_", 1)[0] if "_batch_" in normalized_target else ""
+        if batch_origin in node_lookup and verb in {"INSPECT", "QUARANTINE", "LIFT", "ALERT"}:
+            debug_to_stderr(f"ACTION_REPAIR: {verb} {normalized_target} -> {verb} {batch_origin} (batch origin)")
+            normalized_target = batch_origin
 
     if verb in {"INSPECT", "QUARANTINE", "LIFT"}:
         return f"{verb} {normalized_target}" if normalized_target in node_lookup else None
     if verb == "ALERT":
         node = node_lookup.get(normalized_target)
-        return f"ALERT {normalized_target}" if (node and node.node_type == "retailer") else None
+        if node and node.node_type == "retailer":
+            return f"ALERT {normalized_target}"
+        if node and known_results.get(normalized_target) == "contaminated":
+            if not observation.quarantine_status.get(normalized_target, False):
+                debug_to_stderr(f"ACTION_REPAIR: ALERT {normalized_target} -> QUARANTINE {normalized_target} (confirmed contaminated)")
+                return f"QUARANTINE {normalized_target}"
+            replacement_trace = next_traceable_batch_for_target(normalized_target, observation)
+            if replacement_trace:
+                debug_to_stderr(f"ACTION_REPAIR: ALERT {normalized_target} -> TRACE {replacement_trace} (confirmed node already quarantined)")
+                return f"TRACE {replacement_trace}"
+            debug_to_stderr(f"ACTION_REPAIR: ALERT {normalized_target} -> WAIT (confirmed node already quarantined)")
+            return "WAIT"
+        if (
+            node
+            and observation.lab_budget > 0
+            and normalized_target not in known_results
+            and normalized_target not in pending_nodes
+        ):
+            debug_to_stderr(f"ACTION_REPAIR: ALERT {normalized_target} -> INSPECT {normalized_target} (non-retailer)")
+            return f"INSPECT {normalized_target}"
+        if node:
+            debug_to_stderr(f"ACTION_REPAIR: ALERT {normalized_target} -> WAIT (non-retailer not actionable)")
+            return "WAIT"
+        return None
     if verb == "TRACE":
-        return f"TRACE {normalized_target}" if normalized_target in trace_lookup else None
+        node = node_lookup.get(normalized_target)
+        if node:
+            for batch_id in node.batch_ids:
+                normalized_batch = batch_id.strip().lower()
+                if normalized_batch in trace_lookup:
+                    debug_to_stderr(f"ACTION_REPAIR: TRACE {normalized_target} -> TRACE {normalized_batch} (node batch)")
+                    return f"TRACE {normalized_batch}"
+        replacement_trace = next_traceable_batch_for_target(normalized_target, observation)
+        if replacement_trace:
+            if replacement_trace != normalized_target:
+                debug_to_stderr(f"ACTION_REPAIR: TRACE {normalized_target} -> TRACE {replacement_trace} (valid trace target)")
+            return f"TRACE {replacement_trace}"
+        if normalized_target in {bid.strip().lower() for bid in observation.traced_batches}:
+            debug_to_stderr(f"ACTION_REPAIR: TRACE {normalized_target} -> WAIT (already traced)")
+            return "WAIT"
+        return None
     if verb == "RECALL":
+        node = node_lookup.get(normalized_target)
+        if node and known_results.get(normalized_target) == "contaminated":
+            for batch_id in node.batch_ids:
+                normalized_batch = batch_id.strip().lower()
+                if normalized_batch in recall_lookup:
+                    debug_to_stderr(f"ACTION_REPAIR: RECALL {normalized_target} -> RECALL {normalized_batch} (node batch)")
+                    return f"RECALL {normalized_batch}"
         return f"RECALL {normalized_target}" if normalized_target in recall_lookup else None
 
     return None
@@ -460,6 +745,7 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation, hist
 
     pending_nodes = set(extract_pending_inspection_nodes(observation))
     known_results = {nid.lower(): result for nid, result in observation.lab_results.items()}
+    node_lookup = {node.node_id.lower(): node for node in observation.nodes}
 
     if verb == "INSPECT":
         # Block if no lab budget left — environment rejects and charges wasted-action penalty
@@ -470,12 +756,35 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation, hist
             debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (already pending)")
             return "WAIT"
         if target in known_results:
+            if known_results[target] == "contaminated" and not observation.quarantine_status.get(target, False):
+                debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> QUARANTINE {target} (result already contaminated)")
+                return f"QUARANTINE {target}"
+            if known_results[target] == "clean" and observation.quarantine_status.get(target, False):
+                debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> LIFT {target} (result already clean)")
+                return f"LIFT {target}"
+            replacement_trace = next_traceable_batch_for_target(target, observation)
+            if replacement_trace:
+                debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> TRACE {replacement_trace} (result already known)")
+                return f"TRACE {replacement_trace}"
             debug_to_stderr(f"ACTION_GUARD: INSPECT {target} -> WAIT (result already known)")
             return "WAIT"
 
     if verb == "QUARANTINE":
         if observation.quarantine_status.get(target, False):
+            replacement_trace = next_traceable_batch_for_target(target, observation)
+            if replacement_trace:
+                debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> TRACE {replacement_trace} (already quarantined)")
+                return f"TRACE {replacement_trace}"
             debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> WAIT (already quarantined)")
+            return "WAIT"
+        if known_results.get(target) != "contaminated":
+            if target in pending_nodes:
+                debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> WAIT (lab pending)")
+                return "WAIT"
+            if observation.lab_budget > 0 and target not in known_results:
+                debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> INSPECT {target} (needs lab confirmation)")
+                return f"INSPECT {target}"
+            debug_to_stderr(f"ACTION_GUARD: QUARANTINE {target} -> WAIT (not confirmed contaminated)")
             return "WAIT"
 
     if verb == "LIFT":
@@ -483,10 +792,34 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation, hist
             debug_to_stderr(f"ACTION_GUARD: LIFT {target} -> WAIT (not quarantined)")
             return "WAIT"
 
+    if verb == "ALERT":
+        node = node_lookup.get(target)
+        if not node or node.node_type != "retailer":
+            debug_to_stderr(f"ACTION_GUARD: ALERT {target} -> WAIT (alerts require retailer)")
+            return "WAIT"
+
+        illness_retailers = {report.retailer_id.lower() for report in observation.illness_reports}
+        if target not in illness_retailers:
+            debug_to_stderr(f"ACTION_GUARD: ALERT {target} -> WAIT (no illness report for retailer)")
+            return "WAIT"
+
+        if observation.public_trust <= 0.2:
+            debug_to_stderr(f"ACTION_GUARD: ALERT {target} -> WAIT (public_trust={observation.public_trust:.2f})")
+            return "WAIT"
+
+        recent_actions = history[-5:] if history else []
+        if any(f"action=ALERT {target}" in item for item in recent_actions):
+            debug_to_stderr(f"ACTION_GUARD: ALERT {target} -> WAIT (recent alert already issued)")
+            return "WAIT"
+
     if verb == "TRACE":
         # Block if this batch was already traced — re-tracing learns nothing
         already_traced = {bid.strip().lower() for bid in observation.traced_batches}
         if target in already_traced:
+            replacement_trace = next_traceable_batch_for_target(target, observation)
+            if replacement_trace:
+                debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> TRACE {replacement_trace} (already traced)")
+                return f"TRACE {replacement_trace}"
             debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> WAIT (already traced)")
             return "WAIT"
         # Block if the last step took the exact same TRACE action
@@ -495,6 +828,10 @@ def apply_action_guard(action_str: str, observation: FoodCrisisObservation, hist
             if last_action_match:
                 last_action = last_action_match.group(1).strip().lower()
                 if last_action == f"trace {target}":
+                    replacement_trace = next_traceable_batch_for_target(target, observation)
+                    if replacement_trace:
+                        debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> TRACE {replacement_trace} (same as last step)")
+                        return f"TRACE {replacement_trace}"
                     debug_to_stderr(f"ACTION_GUARD: TRACE {target} -> WAIT (same as last step)")
                     return "WAIT"
         # Redirect TRACE to QUARANTINE when confirmed-contaminated unquarantined nodes exist
@@ -565,6 +902,20 @@ def deterministic_fallback(observation: FoodCrisisObservation, history: List[str
     recallable_set: set = set(recallable)
     confirmed_contaminated_nodes: set = {nid for nid, r in lab_results.items() if r == "contaminated"}
 
+    def trace_from_node_types(node_types: set[str]) -> Optional[str]:
+        candidates = [
+            node for node in observation.nodes
+            if node.node_type in node_types
+            and any(batch_id.strip().lower() in traceable_set for batch_id in node.batch_ids)
+        ]
+        candidates.sort(key=lambda node: (node.sensor_reading, len(node.batch_ids)), reverse=True)
+        for node in candidates:
+            for batch_id in node.batch_ids:
+                normalized = batch_id.strip().lower()
+                if normalized in traceable_set:
+                    return f"TRACE {normalized}"
+        return None
+
     # ── P3: recall confirmed-contaminated batch at a retailer ───────────────
     if observation.recall_budget >= 10:
         for node in observation.nodes:
@@ -575,12 +926,37 @@ def deterministic_fallback(observation: FoodCrisisObservation, history: List[str
 
     # ── P4: trace untraced batch at retailer ───────────────────────────────
     if traceable_set:
-        for node in observation.nodes:
-            if node.node_type == "retailer":
-                for bid in node.batch_ids:
-                    normalized = bid.strip().lower()
-                    if normalized in traceable_set:
-                        return f"TRACE {normalized}"
+        retailer_trace = trace_from_node_types({"retailer"})
+        if retailer_trace:
+            return retailer_trace
+
+    # ── P5: trace untraced batch at warehouse ───────────────────────────────
+    if traceable_set:
+        warehouse_trace = trace_from_node_types({"warehouse"})
+        if warehouse_trace:
+            return warehouse_trace
+
+    # Wait for already-requested lab evidence before spending another lab token.
+    if pending:
+        return "WAIT"
+
+    # ── P6: inspect highest-sensor uninspected upstream node ────────────────
+    if observation.lab_budget > 0:
+        upstream_candidates = [
+            node for node in observation.nodes
+            if node.node_type in {"farm", "processing"}
+            and node.node_id not in lab_results
+            and node.node_id not in pending_set
+        ]
+        if upstream_candidates:
+            upstream_candidates.sort(key=lambda node: node.sensor_reading, reverse=True)
+            return f"INSPECT {upstream_candidates[0].node_id}"
+
+    # ── P7: trace any remaining visible batch, highest-sensor node first ────
+    if traceable_set:
+        remaining_trace = trace_from_node_types({"processing", "farm"})
+        if remaining_trace:
+            return remaining_trace
 
     # ── P5: wait while pending lab results are on their way ────────────────
     if pending:
@@ -595,14 +971,23 @@ def deterministic_fallback(observation: FoodCrisisObservation, history: List[str
 
 def request_model_completion(client: Any, model_name: str, messages: List[Dict[str, str]]) -> str:
     """Request a completion from the LLM model."""
-    completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
-        stream=False,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
+    # Handle both OpenAI API and local models
+    if isinstance(client, LocalModelClient):
+        completion = client.chat_completions().create(
+            model=model_name,
+            messages=messages,
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+        )
+    else:
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+            stream=False,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
     return extract_completion_text(completion)
 
 
@@ -626,14 +1011,15 @@ def request_action(
             access_state.circuit_open_reported = True
         return "WAIT"
 
-    # Deterministic fallback: skip LLM when the correct action is unambiguous
-    fallback = deterministic_fallback(observation, history)
-    if fallback is not None:
-        debug_to_stderr(f"DETERMINISTIC_FALLBACK: {fallback}")
-        return fallback
+    if ENABLE_DETERMINISTIC_FALLBACK:
+        fallback = deterministic_fallback(observation, history)
+        if fallback is not None:
+            debug_to_stderr(f"DETERMINISTIC_FALLBACK: {fallback}")
+            return fallback
 
-    # Rate-limit sleep — keeps Groq free tier inside 30 req/min
-    time.sleep(LLM_RATE_LIMIT_SLEEP)
+    # Rate-limit sleep is only needed for remote APIs.
+    if not isinstance(client, LocalModelClient):
+        time.sleep(LLM_RATE_LIMIT_SLEEP)
 
     user_prompt = build_user_prompt(step, observation, history)
     messages = [

@@ -420,6 +420,59 @@ API_BASE_URL=https://api.groq.com/openai/v1
 MODEL_NAME=llama-3.1-8b-instant
 ```
 
+### GRPO Training on Colab T4
+
+Use this when you want to train with GPU in Colab.
+
+```bash
+# 1) Clone
+git clone https://github.com/manashatwar/-FoodCrisisEnv
+cd -FoodCrisisEnv
+
+# 2) Run Colab launcher (recommended defaults for T4)
+bash scripts/colab_t4_train.sh
+```
+
+The launcher installs training deps and runs `train_grpo.py` in manual GRPO mode.
+It uses T4-safe defaults:
+
+- `GROUP_SIZE=2`
+- `GRPO_MAX_LENGTH=256`
+- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+- `--lora` enabled
+
+Override any setting inline:
+
+```bash
+MODEL_NAME=Qwen/Qwen2.5-0.5B-Instruct \
+EPISODES=12 \
+GROUP_SIZE=2 \
+LEARNING_RATE=5e-6 \
+TEMPERATURE=0.9 \
+SEED=7 \
+SAVE_PATH=/content/grpo_t4_30m \
+USE_LORA=1 \
+bash scripts/colab_t4_train.sh
+```
+
+Direct command (without launcher):
+
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+GRPO_MAX_LENGTH=256 \
+python train_grpo.py \
+  --mode manual \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --episodes 12 \
+  --group-size 2 \
+  --learning-rate 5e-6 \
+  --temperature 0.9 \
+  --seed 7 \
+  --device cuda \
+  --save-path ./grpo_t4_30m \
+  --lora
+```
+
 ---
 
 ## Project Layout

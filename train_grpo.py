@@ -62,6 +62,7 @@ from inference import (
 )
 
 SUPPORTED_ACTIONS = ("INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT")
+TRAIN_MAX_LENGTH = int(os.getenv("GRPO_MAX_LENGTH", "512"))
 
 # ── prompt templates (same format as inference.py for compatibility) ───────────
 
@@ -174,7 +175,7 @@ def run_episode_with_llm(
 
         # Tokenise and generate (no grad — we recompute for backward pass)
         inputs = tokenizer(
-            prompt_text, return_tensors="pt", truncation=True, max_length=1024
+            prompt_text, return_tensors="pt", truncation=True, max_length=TRAIN_MAX_LENGTH
         ).to(device)
 
         with torch.no_grad():
@@ -239,45 +240,28 @@ def compute_grpo_loss(
     std_score = max(1e-8, variance ** 0.5)
     advantages = [(s - mean_score) / std_score for s in scores]
 
-    loss_terms: list[Any] = []
+    valid_step_specs: list[tuple[StepData, float, int]] = []
 
     for episode, advantage in zip(group_episodes, advantages):
         for step in episode.steps:
-            full_text = step.prompt_text + step.completion_text
-
-            full_inputs = tokenizer(
-                full_text, return_tensors="pt", truncation=True, max_length=1024
-            ).to(device)
-
             prompt_ids_only = tokenizer(
-                step.prompt_text, return_tensors="pt", truncation=True, max_length=1024
+                step.prompt_text, return_tensors="pt", truncation=True, max_length=TRAIN_MAX_LENGTH
             )
             prompt_len = prompt_ids_only["input_ids"].shape[1]
 
+            full_inputs = tokenizer(
+                step.prompt_text + step.completion_text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=TRAIN_MAX_LENGTH,
+            )
             total_len = full_inputs["input_ids"].shape[1]
-            # logit at position i predicts token i+1
             comp_start = min(prompt_len - 1, total_len - 2)
             comp_end = total_len - 1
 
             if comp_start >= comp_end:
                 continue
-
-            # Forward pass WITH gradients (this is the key difference from rollout)
-            outputs = model(**full_inputs)
-            logits = outputs.logits[0]  # [seq_len, vocab]
-
-            completion_logits = logits[comp_start:comp_end]
-            completion_ids = full_inputs["input_ids"][0, comp_start + 1 : comp_end + 1]
-
-            if len(completion_ids) == 0:
-                continue
-
-            log_probs = F.log_softmax(completion_logits, dim=-1)
-            token_log_probs = log_probs[range(len(completion_ids)), completion_ids]
-
-            # GRPO: reinforce high-advantage episodes, suppress low-advantage ones
-            step_loss = -advantage * token_log_probs.mean()
-            loss_terms.append(step_loss)
+            valid_step_specs.append((step, float(advantage), int(prompt_len)))
 
     metrics: dict[str, Any] = {
         "mean_score": mean_score,
@@ -285,16 +269,50 @@ def compute_grpo_loss(
         "advantages": [round(a, 4) for a in advantages],
     }
 
-    if not loss_terms:
+    if not valid_step_specs:
         # No valid completions — return a zero loss attached to params so backward still works
         dummy_param = next(p for p in model.parameters() if p.requires_grad)
         zero_loss = dummy_param.sum() * 0.0
         metrics["loss"] = 0.0
         return zero_loss, metrics
 
-    total_loss: Any = torch.stack(loss_terms).mean()
-    metrics["loss"] = float(total_loss.item())
-    return total_loss, metrics
+    total_loss_value = 0.0
+    step_count = len(valid_step_specs)
+
+    for step, advantage, prompt_len in valid_step_specs:
+        full_inputs = tokenizer(
+            step.prompt_text + step.completion_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=TRAIN_MAX_LENGTH,
+        ).to(device)
+
+        total_len = full_inputs["input_ids"].shape[1]
+        comp_start = min(prompt_len - 1, total_len - 2)
+        comp_end = total_len - 1
+        if comp_start >= comp_end:
+            continue
+
+        outputs = model(**full_inputs, use_cache=False)
+        logits = outputs.logits[0]
+        completion_logits = logits[comp_start:comp_end]
+        completion_ids = full_inputs["input_ids"][0, comp_start + 1 : comp_end + 1]
+
+        if len(completion_ids) == 0:
+            continue
+
+        log_probs = F.log_softmax(completion_logits, dim=-1)
+        token_log_probs = log_probs[range(len(completion_ids)), completion_ids]
+        step_loss = -advantage * token_log_probs.mean()
+        total_loss_value += float(step_loss.detach().item())
+        (step_loss / step_count).backward()
+
+        del outputs, logits, completion_logits, completion_ids, log_probs, token_log_probs, step_loss, full_inputs
+
+    mean_loss = total_loss_value / max(1, step_count)
+    metrics["loss"] = mean_loss
+    dummy_param = next(p for p in model.parameters() if p.requires_grad)
+    return dummy_param.new_tensor(mean_loss), metrics
 
 
 def push_output_to_hub(local_dir: Path, repo_id: str) -> None:
@@ -381,6 +399,8 @@ def train_manual_grpo(
 
     model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     model = model.to(device)
+    if hasattr(model, "config"):
+        model.config.use_cache = False
 
     # ── optional LoRA ──────────────────────────────────────────────────────────
     if use_lora:
@@ -396,6 +416,12 @@ def train_manual_grpo(
                 task_type=TaskType.CAUSAL_LM,
             )
             model = get_peft_model(model, lora_cfg)
+            if hasattr(model, "config"):
+                model.config.use_cache = False
+            if hasattr(model, "gradient_checkpointing_enable"):
+                model.gradient_checkpointing_enable()
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
             model.print_trainable_parameters()
         except ImportError:
             print("⚠  peft not installed — LoRA skipped. Install: pip install peft")
@@ -465,15 +491,13 @@ def train_manual_grpo(
 
             # ── update phase (with grad) ───────────────────────────────────────
             model.train()
+            optimizer.zero_grad(set_to_none=True)
             loss, metrics = compute_grpo_loss(
                 model=model,
                 tokenizer=tokenizer,
                 group_episodes=group_episodes,
                 device=device_str,
             )
-
-            optimizer.zero_grad()
-            loss.backward()
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
             optimizer.step()
 
@@ -634,7 +658,7 @@ def train_trl_grpo(
                     prompt_text = f"{SYSTEM_PROMPT}\n\nUser: {user_content}\nAssistant:"
 
                 tok_in = tokenizer(
-                    prompt_text, return_tensors="pt", truncation=True, max_length=1024
+                    prompt_text, return_tensors="pt", truncation=True, max_length=TRAIN_MAX_LENGTH
                 ).to(device)
                 input_len = tok_in["input_ids"].shape[1]
 

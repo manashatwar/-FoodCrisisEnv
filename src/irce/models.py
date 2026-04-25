@@ -138,6 +138,11 @@ class FoodCrisisObservation(Observation):
     agent_memory: Optional[AgentMemory] = None
     # Count of adversarial trap nodes in the current episode (identity is hidden from agent)
     adversarial_trap_count: int = Field(default=0, ge=0)
+    # Active deception level this episode (0.0 = no deception, 1.0 = maximum)
+    deception_level: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Three deception resistance metrics, computed per step
+    # Keys: deception_resistance, symptom_chasing_rate, budget_efficiency
+    deception_metrics: Dict[str, float] = Field(default_factory=dict)
 
 
 class FoodCrisisState(State):
@@ -182,3 +187,15 @@ class FoodCrisisState(State):
     total_contaminated_batches: int = Field(default=0, ge=0)
     contained_at_step: Optional[int] = None
     batch_counter: int = Field(default=0, ge=0)
+    # Active deception level for this episode
+    deception_level: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Metric: trap nodes seen (sensor >= 0.4) that were inspected and confirmed clean
+    correct_trap_identifications: int = Field(default=0, ge=0)
+    # Metric: trap nodes whose high sensor reading was observed by the agent
+    total_false_signals_encountered: int = Field(default=0, ge=0)
+    # Metric: total quarantine calls (correct + wrong)
+    total_quarantines: int = Field(default=0, ge=0)
+    # Metric: quarantines on downstream-only nodes (warehouse/retailer) — symptom chasing proxy
+    downstream_quarantines: int = Field(default=0, ge=0)
+    # Metric: inspections where the lab result was eventually returned
+    completed_inspections: int = Field(default=0, ge=0)

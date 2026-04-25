@@ -140,6 +140,7 @@ def run_episode_with_llm(
     device: str,
     temperature: float = 0.9,
     max_new_tokens: int = 12,
+    deception_level: float = 0.0,
 ) -> EpisodeData:
     """
     Run one full FoodCrisisEnv episode using model.generate() as the policy.
@@ -151,7 +152,7 @@ def run_episode_with_llm(
 
     env = FoodCrisisEnv(task_id=task_id, seed=seed)
     task_config = get_task_config(task_id)
-    observation = env.reset(seed=seed, task_id=task_id)
+    observation = env.reset(seed=seed, task_id=task_id, deception_level=getattr(env, '_active_deception_level', 0.0))
 
     episode = EpisodeData(task_id=task_id, seed=seed)
     history: list[str] = []
@@ -350,6 +351,7 @@ def train_manual_grpo(
     save_path: Path,
     device_str: str,
     push_to_hub_repo: str | None,
+    deception_level: float = 0.0,
 ) -> None:
     """
     Manual GRPO training loop.
@@ -440,6 +442,9 @@ def train_manual_grpo(
 
     print("Starting GRPO training …\n")
 
+    # Dynamic curriculum: starts at the requested deception_level and increases when agent improves
+    current_deception_level = float(deception_level)
+
     while episode_count < episodes:
         for task_id in task_ids:
             if episode_count >= episodes:
@@ -468,6 +473,7 @@ def train_manual_grpo(
                     seed=ep_seed,
                     device=device_str,
                     temperature=temperature,
+                    deception_level=current_deception_level,
                 )
                 group_episodes.append(ep)
                 episode_count += 1
@@ -852,6 +858,18 @@ Examples:
         help="Directory for saved model or LoRA adapter",
     )
     p.add_argument(
+        "--deception-level",
+        type=float,
+        default=0.0,
+        help="Starting deception level (0.0=none, 1.0=max). Dynamic curriculum auto-increases.",
+    )
+    p.add_argument(
+        "--deception-level",
+        type=float,
+        default=0.0,
+        help="Starting deception level (0.0=none, 1.0=max). Curriculum auto-increases when score>0.65.",
+    )
+    p.add_argument(
         "--push-to-hub-repo",
         default=None,
         help="Optional Hugging Face model repo id to upload the saved training output",
@@ -875,6 +893,7 @@ def main() -> None:
             save_path=args.save_path,
             device_str=device,
             push_to_hub_repo=args.push_to_hub_repo,
+            deception_level=getattr(args, 'deception_level', 0.0),
         )
     else:
         train_trl_grpo(

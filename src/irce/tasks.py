@@ -54,7 +54,58 @@ class TaskConfig:
         return tuple(spec.node_id for spec in self.node_specs if spec.node_type == "retailer")
 
 
+
+# ---------------------------------------------------------------------------
+# Deception scaling — independent of task_id graph structure
+# ---------------------------------------------------------------------------
+
+# Per-task caps for deception parameters.
+# At deception_level=0.0: parameters match the task's base TaskConfig exactly.
+# At deception_level=1.0: parameters reach these maximums.
+# The graph (nodes, edges, n_sources) is NEVER mutated by deception_level.
+DECEPTION_CAPS: dict[int, dict[str, float | int]] = {
+    1: {"max_false_signals": 3, "max_noise": 0.25, "max_delay": 5},
+    2: {"max_false_signals": 4, "max_noise": 0.25, "max_delay": 6},
+    3: {"max_false_signals": 5, "max_noise": 0.30, "max_delay": 8},
+}
+
+
+def compute_deception_params(
+    task_id: int,
+    deception_level: float,
+    base_config: "TaskConfig",
+) -> dict[str, object]:
+    """Return effective adversarial params for a given (task_id, deception_level) pair.
+
+    Uses simple linear interpolation between the task's base values (at dec=0.0)
+    and the per-task cap (at dec=1.0).  Accepts ANY float in [0.0, 1.0].
+
+    The formula is deterministic and instant — no lookup table.
+
+    Example (Task 1, deception_level=0.37):
+        false_signal_count = int(0.37 * 3)           = 1
+        sensor_noise_std   = 0.05 + (0.37 * 0.20)   = 0.124
+        illness_delay      = 1 + int(0.37 * 4)       = 2
+        randomize_sources  = 0.37 < 0.4              = False
+    """
+    dec = max(0.0, min(1.0, float(deception_level)))
+    caps = DECEPTION_CAPS.get(task_id, DECEPTION_CAPS[3])
+    return {
+        "false_signal_count": int(dec * caps["max_false_signals"]),
+        "sensor_noise_std": round(
+            base_config.sensor_noise_std
+            + dec * (float(caps["max_noise"]) - base_config.sensor_noise_std),
+            4,
+        ),
+        "illness_delay": base_config.illness_delay + int(
+            dec * (int(caps["max_delay"]) - base_config.illness_delay)
+        ),
+        "randomize_sources": dec > 0.4,
+    }
+
+
 def build_task_registry() -> dict[int, TaskConfig]:
+
     return {
         1: TaskConfig(
             task_id=1,

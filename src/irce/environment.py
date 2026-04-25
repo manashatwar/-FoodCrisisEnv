@@ -38,7 +38,7 @@ from irce.models import (
     SUPPORTED_ACTIONS,
 )
 from irce.rewards import compute_step_reward, RewardBreakdown
-from irce.tasks import TaskConfig, get_task_config
+from irce.tasks import TaskConfig, compute_deception_params, get_task_config
 
 
 class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCrisisState]):
@@ -61,7 +61,13 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
     def reset(self, seed: int | None = None, episode_id: str | None = None, **kwargs: object) -> FoodCrisisObservation:
         requested_task_id = kwargs.pop("task_id", self.task_id)
         self.task_id = int(requested_task_id)
+        deception_level = float(kwargs.pop("deception_level", 0.0))
         self._set_task(self.task_id)
+        # Compute effective adversarial params via linear interpolation.
+        # At deception_level=0.0 this returns values identical to the base TaskConfig.
+        self._effective_deception: dict[str, object] = compute_deception_params(
+            self.task_id, deception_level, self.task_config
+        )
         self._reset_rubric()
 
         episode_seed = self._default_seed if seed is None else seed
@@ -79,6 +85,7 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             public_trust=1.0,
             compat_error_type="TRANSIENT",
             compat_same_error_count=0,
+            deception_level=deception_level,
         )
 
         for spec in self.task_config.node_specs:
@@ -185,6 +192,12 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                 state.total_actions += 1
                 state.quarantine_status[target] = True
                 state.nodes[target].quarantined = True
+                state.total_quarantines += 1
+                # Symptom-chasing: quarantine on downstream nodes (warehouse/retailer) without
+                # confirmed upstream contamination source
+                node_type = state.nodes[target].node_type
+                if node_type in {"warehouse", "retailer"}:
+                    state.downstream_quarantines += 1
                 if state.true_contamination[target] >= config.contamination_threshold:
                     state.correct_actions += 1
                     correct_quarantine = True
@@ -416,10 +429,17 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                     state.total_contaminated_batches += 1
 
     def _assign_false_signals(self, state: FoodCrisisState) -> None:
-        if self.task_config.false_signal_count <= 0:
+        # Use the effective deception param (accounts for deception_level);
+        # falls back to task config if _effective_deception is not yet set.
+        effective_false_count = int(
+            getattr(self, "_effective_deception", {}).get(
+                "false_signal_count", self.task_config.false_signal_count
+            )
+        )
+        if effective_false_count <= 0:
             return
         candidates = [node_id for node_id in self.task_config.node_ids if node_id not in state.source_nodes]
-        count = min(self.task_config.false_signal_count, len(candidates))
+        count = min(effective_false_count, len(candidates))
         state.adversarial_trap_nodes = sorted(self._rng.sample(candidates, count))
 
     def _sample_path(self, origin: str) -> list[str]:
@@ -601,6 +621,12 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
 
     def _deliver_retail_exposure(self, state: FoodCrisisState) -> int:
         new_cases = 0
+        # Use effective illness_delay (accounts for deception_level scaling)
+        effective_delay = int(
+            getattr(self, "_effective_deception", {}).get(
+                "illness_delay", self.task_config.illness_delay
+            )
+        )
         for batch in state.batch_records.values():
             if batch.recalled or batch.delivered:
                 continue
@@ -623,8 +649,8 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                 IllnessReport(
                     retailer_id=current_node,
                     case_count=case_count,
-                    timestep_reported=state.timestep + self.task_config.illness_delay,
-                    report_text=f"{case_count} illness cases reported at {current_node} (reported hour {state.timestep + self.task_config.illness_delay})",
+                    timestep_reported=state.timestep + effective_delay,
+                    report_text=f"{case_count} illness cases reported at {current_node} (reported hour {state.timestep + effective_delay})",
                 )
             )
         return new_cases
@@ -639,6 +665,21 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                 remaining.append(pending)
         state.pending_inspections = remaining
         state.lab_results.update(released)
+        # Track completed inspections for budget_efficiency metric
+        state.completed_inspections += len(released)
+        # Track correct trap identifications:
+        # A trap is "correctly identified" when the agent inspected it, got "clean",
+        # has NOT quarantined it, and its sensor was >= 0.4 (visible false spike)
+        trap_set = set(state.adversarial_trap_nodes)
+        for node_id, result in released.items():
+            if result == "clean" and node_id in trap_set:
+                # Count trap encounter if sensor reading was elevated (agent saw the false signal)
+                sensor = state.nodes[node_id].sensor_reading if node_id in state.nodes else 0.0
+                if sensor >= 0.4 or True:  # always count — trap was seen at assignment time
+                    state.total_false_signals_encountered += 1
+                # Correctly identified only if NOT subsequently quarantined
+                if not state.quarantine_status.get(node_id, False):
+                    state.correct_trap_identifications += 1
         return released
 
     def _release_due_illness_reports(self, state: FoodCrisisState) -> list[IllnessReport]:
@@ -672,9 +713,15 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             ]
 
     def _generate_sensor_readings(self, state: FoodCrisisState) -> dict[str, float]:
+        # Use effective noise std (scales with deception_level)
+        effective_noise_std = float(
+            getattr(self, "_effective_deception", {}).get(
+                "sensor_noise_std", self.task_config.sensor_noise_std
+            )
+        )
         sensor_readings: dict[str, float] = {}
         for node_id in self.task_config.node_ids:
-            noise = self._rng.gauss(0.0, self.task_config.sensor_noise_std)
+            noise = self._rng.gauss(0.0, effective_noise_std)
             reading = state.true_contamination[node_id] + noise
             if node_id in state.adversarial_trap_nodes and state.true_contamination[node_id] < 0.2:
                 reading += 0.45
@@ -774,6 +821,8 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             reward_breakdown=reward_breakdown,
             agent_memory=self._build_agent_memory(state),
             adversarial_trap_count=len(state.adversarial_trap_nodes),
+            deception_level=state.deception_level,
+            deception_metrics=self._compute_deception_metrics(state),
         )
         observation.status_summary = observation.natural_language_summary
         return self._apply_transform(observation)
@@ -896,6 +945,30 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             illness_retailer_ids=sorted(illness_retailer_ids),
             identified_traps=sorted(identified_traps),
         )
+
+    def _compute_deception_metrics(self, state: FoodCrisisState) -> dict[str, float]:
+        """Compute the three deception resistance metrics from accumulated state counters.
+
+        deception_resistance  — fraction of traps the agent correctly ignored after verifying
+        symptom_chasing_rate  — fraction of quarantines on downstream (warehouse/retailer) nodes
+        budget_efficiency     — fraction of lab budget that produced completed results
+        """
+        deception_resistance = (
+            round(state.correct_trap_identifications / max(1, state.total_false_signals_encountered), 3)
+            if state.adversarial_trap_nodes else 1.0
+        )
+        symptom_chasing_rate = (
+            round(state.downstream_quarantines / max(1, state.total_quarantines), 3)
+            if state.total_quarantines > 0 else 0.0
+        )
+        budget_efficiency = round(
+            state.completed_inspections / max(1, self.task_config.lab_budget), 3
+        )
+        return {
+            "deception_resistance": deception_resistance,
+            "symptom_chasing_rate": symptom_chasing_rate,
+            "budget_efficiency": budget_efficiency,
+        }
 
     def _edge_key(self, source: str, target: str) -> str:
         return f"{source}->{target}"

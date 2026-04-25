@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -17,6 +17,11 @@ class RewardBreakdown:
     wasted_action_penalty: float
     active_source_penalty: float
     trace_cost: float
+    # Bonus for TRACE → INSPECT(contaminated) → QUARANTINE sequence.
+    # Rewards evidence-based decisions over lucky guesses.
+    verified_quarantine_bonus: float
+    # Reward for the CONCLUDE action: scaled +5.0 for correct, -1.0/-0.5 for premature/no-evidence.
+    conclude_bonus: float
     total: float
 
 
@@ -34,6 +39,8 @@ def compute_step_reward(
     wasted_action: bool,
     active_uncontained_sources: int,
     trace_performed: bool,
+    verified_quarantine: bool = False,
+    conclude_bonus: float = 0.0,
 ) -> RewardBreakdown:
     shipment_penalty = -1.5 * float(new_contaminated_shipments)
     illness_penalty = -0.5 * float(new_illness_cases)
@@ -47,6 +54,9 @@ def compute_step_reward(
     wasted_action_penalty = -0.1 if wasted_action else 0.0
     active_source_penalty = -0.15 * float(active_uncontained_sources)
     trace_cost = -0.1 if trace_performed else 0.0
+    # +1.5 only when the agent confirmed contamination via INSPECT before quarantining.
+    # An agent that blindly quarantines the right node gets 0.0 here.
+    verified_quarantine_bonus = 1.5 if verified_quarantine else 0.0
 
     total = (
         shipment_penalty
@@ -61,6 +71,8 @@ def compute_step_reward(
         + wasted_action_penalty
         + active_source_penalty
         + trace_cost
+        + verified_quarantine_bonus
+        + conclude_bonus
     )
 
     return RewardBreakdown(
@@ -76,5 +88,7 @@ def compute_step_reward(
         wasted_action_penalty=wasted_action_penalty,
         active_source_penalty=active_source_penalty,
         trace_cost=trace_cost,
+        verified_quarantine_bonus=verified_quarantine_bonus,
+        conclude_bonus=conclude_bonus,
         total=round(total, 3),
     )

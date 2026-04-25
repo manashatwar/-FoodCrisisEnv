@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+from irce.rewards import RewardBreakdown
 
 if os.getenv("FOODCRISIS_STANDALONE") == "1":
     class Action(BaseModel):
@@ -22,7 +23,7 @@ else:
     except ImportError:  # pragma: no cover
         from openenv_core.env_server import Action, Observation, State
 
-SUPPORTED_ACTIONS = {"INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT"}
+SUPPORTED_ACTIONS = {"INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT", "CONCLUDE"}
 
 
 class NodeState(BaseModel):
@@ -90,6 +91,24 @@ class FoodCrisisAction(Action):
         return self.verb in SUPPORTED_ACTIONS
 
 
+class AgentMemory(BaseModel):
+    
+
+    # Nodes where lab results came back "contaminated"
+    confirmed_contaminated: List[str] = Field(default_factory=list)
+    # Nodes where lab results came back "clean"
+    confirmed_clean: List[str] = Field(default_factory=list)
+    # Pending lab submissions: list of {node_id, due_timestep}
+    active_pending_labs: List[Dict[str, Any]] = Field(default_factory=list)
+    # For each traced batch: batch_id -> origin node
+    traced_batch_origins: Dict[str, str] = Field(default_factory=dict)
+    # Retailers that have received at least one illness report
+    illness_retailer_ids: List[str] = Field(default_factory=list)
+    # Adversarial trap nodes the agent has confirmed clean via INSPECT
+    # (inspected AND lab result = "clean" AND node was a false-signal/trap node)
+    identified_traps: List[str] = Field(default_factory=list)
+
+
 class FoodCrisisObservation(Observation):
     timestep: int = Field(default=0, ge=0)
     nodes: List[NodeState] = Field(default_factory=list)
@@ -114,6 +133,11 @@ class FoodCrisisObservation(Observation):
     progress_hint: float = Field(default=0.0, ge=0.0, le=1.0)
     history_tail: List[str] = Field(default_factory=list)
     status_summary: str = ""
+    reward_breakdown: Optional[RewardBreakdown] = None
+    # Structured memory: everything the agent has confirmed so far
+    agent_memory: Optional[AgentMemory] = None
+    # Count of adversarial trap nodes in the current episode (identity is hidden from agent)
+    adversarial_trap_count: int = Field(default=0, ge=0)
 
 
 class FoodCrisisState(State):
@@ -135,7 +159,14 @@ class FoodCrisisState(State):
     lab_budget: int = Field(default=0, ge=0)
     recall_budget: int = Field(default=0, ge=0)
     public_trust: float = Field(default=1.0, ge=0.0, le=1.0)
-    false_signal_nodes: List[str] = Field(default_factory=list)
+    # Renamed from false_signal_nodes — nodes injected with artificially elevated sensor readings
+    adversarial_trap_nodes: List[str] = Field(default_factory=list)
+
+    @property
+    def false_signal_nodes(self) -> List[str]:
+        """Deprecated alias for adversarial_trap_nodes. Use adversarial_trap_nodes instead."""
+        return self.adversarial_trap_nodes
+
     history: List[str] = Field(default_factory=list)
     last_action: str = "RESET"
     last_reward: float = 0.0

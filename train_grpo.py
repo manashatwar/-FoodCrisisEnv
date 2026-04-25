@@ -869,12 +869,6 @@ Examples:
         help="Starting deception level (0.0=none, 1.0=max). Dynamic curriculum auto-increases.",
     )
     p.add_argument(
-        "--deception-level",
-        type=float,
-        default=0.0,
-        help="Starting deception level (0.0=none, 1.0=max). Curriculum auto-increases when score>0.65.",
-    )
-    p.add_argument(
         "--push-to-hub-repo",
         default=None,
         help="Optional Hugging Face model repo id to upload the saved training output",

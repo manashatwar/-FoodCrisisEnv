@@ -27,6 +27,7 @@ else:
         from openenv_core.env_server import Environment
 
 from irce.models import (
+    AgentMemory,
     BatchRecord,
     FoodCrisisAction,
     FoodCrisisObservation,
@@ -36,7 +37,7 @@ from irce.models import (
     PendingInspection,
     SUPPORTED_ACTIONS,
 )
-from irce.rewards import compute_step_reward
+from irce.rewards import compute_step_reward, RewardBreakdown
 from irce.tasks import TaskConfig, get_task_config
 
 
@@ -139,6 +140,9 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
         helpful_action = False
         trace_performed = False
         last_action_error = False
+        verified_quarantine = False  # True when INSPECT→"contaminated" preceded this QUARANTINE
+        conclude_bonus = 0.0         # Set by CONCLUDE branch; 0.0 for all other actions
+        conclude_forced_done = False  # CONCLUDE forces done=True on a correct call
         note = ""
 
         if verb not in SUPPORTED_ACTIONS:
@@ -184,6 +188,9 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                 if state.true_contamination[target] >= config.contamination_threshold:
                     state.correct_actions += 1
                     correct_quarantine = True
+                    # Agent ran INSPECT first and got a "contaminated" result —
+                    # this is evidence-based action, not a lucky guess.
+                    verified_quarantine = state.lab_results.get(target) == "contaminated"
                     if target in state.source_nodes:
                         source_quarantine = True
                         note = f"Quarantine on source node {target} blocked the outbreak origin."
@@ -269,6 +276,30 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
                     state.correct_actions += 1
                     helpful_action = True
                 note = f"Public alert issued for {target}."
+        elif verb == "CONCLUDE":
+            if not state.lab_results:
+                # Agent has done zero inspections — no evidence to base a conclusion on
+                conclude_bonus = -0.5
+                last_action_error = True
+                note = "CONCLUDE rejected: no lab results yet. Inspect nodes before concluding."
+            elif self._active_uncontained_sources(state) > 0:
+                # Sources are still active — premature conclusion
+                conclude_bonus = -1.0
+                last_action_error = True
+                note = "CONCLUDE rejected: contamination sources are still active."
+            elif self._is_contained(state):
+                # All sources quarantined, no active contaminated batches — correct conclusion
+                # Reward scales with speed: finishing early gives up to +5.0, late gives near 0
+                time_ratio = 1.0 - (state.timestep / max(1, config.max_steps))
+                conclude_bonus = round(5.0 * max(0.0, time_ratio), 3)
+                conclude_forced_done = True
+                helpful_action = True
+                note = f"CONCLUDE accepted: outbreak contained. Speed bonus applied ({conclude_bonus:+.2f})."
+            else:
+                # Some batches are still active even if sources are quarantined
+                conclude_bonus = -1.0
+                last_action_error = True
+                note = "CONCLUDE rejected: contaminated batches are still in circulation."
 
         self._apply_clean_quarantine_trust_drain(state)
         self._propagate_contamination(state)
@@ -293,6 +324,8 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             wasted_action=wasted_action,
             active_uncontained_sources=self._active_uncontained_sources(state),
             trace_performed=trace_performed,
+            verified_quarantine=verified_quarantine,
+            conclude_bonus=conclude_bonus,
         )
 
         tool_result = self._derive_tool_result(
@@ -303,13 +336,14 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             released_reports=released_reports,
             note=note,
         )
-        done = self._check_done(state)
+        done = self._check_done(state) or conclude_forced_done
         observation = self._build_observation(
             tool_result=tool_result,
             last_action_error=last_action_error,
             reward=reward_breakdown.total,
             done=done,
             note=note,
+            reward_breakdown=reward_breakdown,
         )
 
         state.history.append(f"t={state.timestep} {resolved_action} -> {tool_result}")
@@ -386,7 +420,7 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             return
         candidates = [node_id for node_id in self.task_config.node_ids if node_id not in state.source_nodes]
         count = min(self.task_config.false_signal_count, len(candidates))
-        state.false_signal_nodes = sorted(self._rng.sample(candidates, count))
+        state.adversarial_trap_nodes = sorted(self._rng.sample(candidates, count))
 
     def _sample_path(self, origin: str) -> list[str]:
         path = [origin]
@@ -642,7 +676,7 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
         for node_id in self.task_config.node_ids:
             noise = self._rng.gauss(0.0, self.task_config.sensor_noise_std)
             reading = state.true_contamination[node_id] + noise
-            if node_id in state.false_signal_nodes and state.true_contamination[node_id] < 0.2:
+            if node_id in state.adversarial_trap_nodes and state.true_contamination[node_id] < 0.2:
                 reading += 0.45
             sensor_readings[node_id] = round(min(1.0, max(0.0, reading)), 3)
         return sensor_readings
@@ -700,6 +734,7 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
         reward: float,
         done: bool,
         note: str,
+        reward_breakdown: RewardBreakdown | None = None,
     ) -> FoodCrisisObservation:
         state = self._state
         sensor_readings = {node_id: node.sensor_reading for node_id, node in state.nodes.items()}
@@ -736,6 +771,9 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             status_summary="",
             reward=round(reward, 3),
             done=done,
+            reward_breakdown=reward_breakdown,
+            agent_memory=self._build_agent_memory(state),
+            adversarial_trap_count=len(state.adversarial_trap_nodes),
         )
         observation.status_summary = observation.natural_language_summary
         return self._apply_transform(observation)
@@ -802,7 +840,10 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
         if len(report_retailers) >= 2:
             hint_parts.append("Hint: multiple downstream signals may suggest a shared source.")
         hint_text = " ".join(hint_parts)
-        false_signal_hint = "Warning: some sensor spikes may be false positives in this task." if state.false_signal_nodes else ""
+        trap_warning = (
+            "Warning: this environment contains adversarial sensor traps. "
+            "Some sensor spikes are deliberately falsified. Verify before acting."
+        ) if state.adversarial_trap_nodes else ""
         return (
             f"Hour {state.timestep} | "
             f"Suspected sources: {suspected_sources}. "
@@ -815,9 +856,46 @@ class FoodCrisisEnv(Environment[FoodCrisisAction, FoodCrisisObservation, FoodCri
             f"Recent traces: {trace_updates}. "
             f"Budget status: lab={state.lab_budget}, recall={state.recall_budget}. "
             f"Trust level: {state.public_trust:.2f}. "
-            f"{note} {hint_text} {false_signal_hint}"
+            f"{note} {hint_text} {trap_warning}"
         ).strip()
 
+
+    def _build_agent_memory(self, state: FoodCrisisState) -> AgentMemory:
+        """Aggregate confirmed knowledge from state into a structured AgentMemory.
+
+        This is pure aggregation — every field is derived from data that already
+        exists in FoodCrisisState. No new simulation information is introduced.
+        """
+        confirmed_contaminated = [
+            node_id for node_id, result in state.lab_results.items() if result == "contaminated"
+        ]
+        confirmed_clean = [
+            node_id for node_id, result in state.lab_results.items() if result == "clean"
+        ]
+        active_pending_labs = [
+            {"node_id": p.node_id, "due_timestep": p.due_timestep}
+            for p in state.pending_inspections
+        ]
+        # Map each traced batch_id to its origin node (from batch_records)
+        traced_batch_origins = {
+            batch_id: state.batch_records[batch_id].origin_node
+            for batch_id in state.traced_batches
+            if batch_id in state.batch_records
+        }
+        illness_retailer_ids = list({report.retailer_id for report in state.illness_reports})
+        # Traps that were inspected and confirmed clean: the agent proved it was a trap
+        trap_set = set(state.adversarial_trap_nodes)
+        identified_traps = [
+            node_id for node_id in confirmed_clean if node_id in trap_set
+        ]
+        return AgentMemory(
+            confirmed_contaminated=sorted(confirmed_contaminated),
+            confirmed_clean=sorted(confirmed_clean),
+            active_pending_labs=active_pending_labs,
+            traced_batch_origins=traced_batch_origins,
+            illness_retailer_ids=sorted(illness_retailer_ids),
+            identified_traps=sorted(identified_traps),
+        )
 
     def _edge_key(self, source: str, target: str) -> str:
         return f"{source}->{target}"

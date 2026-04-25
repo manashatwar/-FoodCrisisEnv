@@ -494,6 +494,11 @@ def train_manual_grpo(
             print(f"\n  Scores     : {[f'{s:.3f}' for s in scores]}")
             print(f"  Mean score : {mean_sc:.3f}")
             print(f"  Advantages : {adv_list}")
+            print(f"  Deception  : {current_deception_level:.3f}")
+            # Dynamic curriculum: increase deception when doing well
+            if mean_sc > 0.65 and current_deception_level < 1.0:
+                current_deception_level = round(min(1.0, current_deception_level + 0.05), 3)
+                print(f"  Deception up -> {current_deception_level:.3f}")
 
             # ── update phase (with grad) ───────────────────────────────────────
             model.train()

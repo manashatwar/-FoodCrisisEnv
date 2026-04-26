@@ -1,28 +1,29 @@
-﻿---
-title: FoodCrisisEnv
+---
+title: DeceptEnv (formerly FoodCrisisEnv)
 emoji: 🥬
 colorFrom: green
 colorTo: red
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Food crisis LLM agent benchmark
+short_description: Adversarial LLM agent benchmark for supply chain tracing
 tags:
   - reinforcement-learning
   - environment
   - benchmark
-  - food-safety
   - llm-agent
+  - adversarial
+  - deception
   - openenv
 ---
 
-# FoodCrisisEnv
+# DeceptEnv (formerly FoodCrisisEnv)
 
-> An OpenEnv benchmark where an agent acts as a food safety investigator tracing contaminated food through a supply chain before it reaches consumers.
+> An OpenEnv adversarial benchmark evaluating an LLM agent's resistance to deception, hallucination, and complex graph reasoning in an active supply chain tracing scenario.
 
-FoodCrisisEnv turns outbreak response into a sequential decision problem. The agent sees noisy sensor data, delayed illness reports, limited lab tests, limited recall budget, and a public-trust penalty for overreacting. It must decide when to trace, inspect, quarantine, alert, recall, or wait.
+DeceptEnv evolves the original FoodCrisisEnv into a strict two-axis adversarial evaluation framework (Deception Intensity and Graph Complexity). The agent acts as an investigator navigating a supply chain where it faces noisy sensor data, delayed illness reports, and crucially, **active deception** and **hallucinated signals**.
 
-This is designed as a real operations benchmark, not a toy control task. The setting is grounded in FDA food traceability workflows and the FSMA 204 traceability rule, where investigators need to connect contaminated lots, shipment history, and late-arriving health signals under time pressure.
+This is designed as a rigorous adversarial operations benchmark. Agents must connect contaminated lots and late-arriving health signals while resisting traps, false alarms, and complex graph structures, culminating in a test of true reasoning and evidence-based decision making (via verified quarantine bonuses).
 
 ---
 

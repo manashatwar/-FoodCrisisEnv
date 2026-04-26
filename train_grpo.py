@@ -64,6 +64,13 @@ from inference import (
 SUPPORTED_ACTIONS = ("INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT")
 TRAIN_MAX_LENGTH = int(os.getenv("GRPO_MAX_LENGTH", "512"))
 
+
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 # ── prompt templates (same format as inference.py for compatibility) ───────────
 
 SYSTEM_PROMPT = (
@@ -308,6 +315,10 @@ def compute_grpo_loss(
         (step_loss / step_count).backward()
 
         del outputs, logits, completion_logits, completion_ids, log_probs, token_log_probs, step_loss, full_inputs
+        if str(device).startswith("cuda"):
+            import torch
+
+            torch.cuda.empty_cache()
 
     mean_loss = total_loss_value / max(1, step_count)
     metrics["loss"] = mean_loss
@@ -351,6 +362,9 @@ def train_manual_grpo(
     device_str: str,
     push_to_hub_repo: str | None,
     deception_level: float = 0.0,
+    load_in_4bit: bool = False,
+    lora_r: int = 8,
+    lora_alpha: int = 16,
 ) -> None:
     """
     Manual GRPO training loop.
@@ -378,6 +392,7 @@ def train_manual_grpo(
     print(f"  Group size : {group_size}  (K completions per GRPO step)")
     print(f"  LR         : {learning_rate}")
     print(f"  LoRA       : {use_lora}")
+    print(f"  4-bit load : {load_in_4bit}")
     print(f"  Save path  : {save_path}")
     print(f"{SEP}\n")
 
@@ -395,11 +410,34 @@ def train_manual_grpo(
     if device_str == "cpu":
         load_kwargs["torch_dtype"] = torch.float32
         load_kwargs["low_cpu_mem_usage"] = True
+    elif load_in_4bit:
+        try:
+            from transformers import BitsAndBytesConfig
+        except ImportError as exc:
+            raise SystemExit(
+                "4-bit training requires bitsandbytes support in transformers. "
+                "Install with: pip install -U bitsandbytes transformers accelerate peft"
+            ) from exc
+
+        cuda_index = 0
+        if ":" in device_str:
+            try:
+                cuda_index = int(device_str.split(":", 1)[1])
+            except ValueError:
+                cuda_index = 0
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        load_kwargs["device_map"] = {"": cuda_index}
     else:
         load_kwargs["torch_dtype"] = torch.float16
 
     model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
-    model = model.to(device)
+    if not load_in_4bit:
+        model = model.to(device)
     if hasattr(model, "config"):
         model.config.use_cache = False
 
@@ -407,10 +445,13 @@ def train_manual_grpo(
     if use_lora:
         try:
             from peft import LoraConfig, TaskType, get_peft_model
+            if load_in_4bit:
+                from peft import prepare_model_for_kbit_training
+                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 
             lora_cfg = LoraConfig(
-                r=8,
-                lora_alpha=16,
+                r=lora_r,
+                lora_alpha=lora_alpha,
                 target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
                 lora_dropout=0.05,
                 bias="none",
@@ -429,7 +470,17 @@ def train_manual_grpo(
 
     # ── optimizer ──────────────────────────────────────────────────────────────
     trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
+    if load_in_4bit and device_str.startswith("cuda"):
+        try:
+            import bitsandbytes as bnb
+
+            optimizer = bnb.optim.PagedAdamW8bit(trainable_params, lr=learning_rate)
+            print("  Optimizer  : bitsandbytes PagedAdamW8bit")
+        except Exception as exc:
+            print(f"  Optimizer  : torch Adam (bitsandbytes optimizer unavailable: {exc})")
+            optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
+    else:
+        optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
 
     task_registry = build_task_registry()
     task_ids = sorted(task_registry)
@@ -500,6 +551,8 @@ def train_manual_grpo(
                 print(f"  Deception up -> {current_deception_level:.3f}")
 
             # ── update phase (with grad) ───────────────────────────────────────
+            if device_str.startswith("cuda"):
+                torch.cuda.empty_cache()
             model.train()
             optimizer.zero_grad(set_to_none=True)
             loss, metrics = compute_grpo_loss(
@@ -788,6 +841,56 @@ def resolve_device(device_str: str) -> str:
     return "cpu"
 
 
+def model_size_billion_hint(model_name: str) -> float | None:
+    match = re.search(r"(?<![\d.])(\d+(?:\.\d+)?)\s*b(?:\b|-|_)", model_name, re.IGNORECASE)
+    if match is None:
+        return None
+    return float(match.group(1))
+
+
+def validate_training_device(args: argparse.Namespace, device: str) -> None:
+    try:
+        import torch
+    except ImportError as exc:
+        raise SystemExit("PyTorch is not installed. Install training dependencies first.") from exc
+
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise SystemExit(
+            "CUDA was requested but PyTorch cannot use CUDA.\n"
+            "In Colab: Runtime > Change runtime type > T4 GPU, then restart runtime.\n"
+            "In Kaggle: Settings > Accelerator > GPU, then restart the session.\n"
+            "Then verify with: import torch; print(torch.cuda.is_available())."
+        )
+
+    if device.startswith("cuda"):
+        size_b = model_size_billion_hint(args.model)
+        allow_full = env_flag("ALLOW_FULL_PRECISION_7B", False)
+        if size_b is not None and size_b >= 7.0 and not args.load_in_4bit and not allow_full:
+            raise SystemExit(
+                f"{args.model} looks like a {size_b:g}B model. Full fp16 GRPO is likely to OOM "
+                "on a 16GB Kaggle/Colab GPU.\n"
+                "Rerun with --load-in-4bit for QLoRA, or set ALLOW_FULL_PRECISION_7B=1 "
+                "if you really want to risk full-precision training."
+            )
+        return
+
+    allow_cpu = os.getenv("ALLOW_CPU_TRAINING", "").strip().lower() in {"1", "true", "yes", "on"}
+    size_b = model_size_billion_hint(args.model)
+    if allow_cpu or size_b is None or size_b < 1.0:
+        return
+
+    raise SystemExit(
+        f"Training resolved to CPU, but {args.model} looks like a {size_b:g}B model.\n"
+        "That will be extremely slow and may appear stuck while loading weights.\n\n"
+        "Fix in Colab:\n"
+        "  1. Runtime > Change runtime type > T4 GPU\n"
+        "  2. Restart runtime\n"
+        "  3. Run: import torch; print(torch.cuda.is_available())\n"
+        "  4. Rerun training with --device cuda\n\n"
+        "For CPU testing, use Qwen/Qwen2.5-0.5B-Instruct or set ALLOW_CPU_TRAINING=1."
+    )
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="True GRPO LLM training for the FoodCrisisEnv benchmark.",
@@ -851,6 +954,24 @@ Examples:
         help="Apply LoRA (PEFT) for memory-efficient training (requires: pip install peft)",
     )
     p.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        default=env_flag("LOAD_IN_4BIT", False),
+        help="Load the base model in 4-bit NF4 for QLoRA-style training (recommended for 7B on 16GB GPUs)",
+    )
+    p.add_argument(
+        "--lora-r",
+        type=int,
+        default=int(os.getenv("LORA_R", "8")),
+        help="LoRA rank. Use 4 for tighter memory, 8 for the default.",
+    )
+    p.add_argument(
+        "--lora-alpha",
+        type=int,
+        default=int(os.getenv("LORA_ALPHA", "16")),
+        help="LoRA alpha. Commonly 2x lora-r.",
+    )
+    p.add_argument(
         "--device",
         default="auto",
         help="Device override: auto | cpu | cuda | cuda:0 | mps",
@@ -878,6 +999,7 @@ Examples:
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
+    validate_training_device(args, device)
 
     if args.mode == "manual":
         train_manual_grpo(
@@ -892,6 +1014,9 @@ def main() -> None:
             device_str=device,
             push_to_hub_repo=args.push_to_hub_repo,
             deception_level=getattr(args, 'deception_level', 0.0),
+            load_in_4bit=args.load_in_4bit,
+            lora_r=args.lora_r,
+            lora_alpha=args.lora_alpha,
         )
     else:
         train_trl_grpo(

@@ -35,6 +35,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -56,9 +57,8 @@ from irce.models import FoodCrisisAction, FoodCrisisObservation
 from irce.tasks import build_task_registry, get_task_config
 from inference import (
     SYSTEM_PROMPT as INFERENCE_SYSTEM_PROMPT,
-    apply_action_guard,
     build_user_prompt,
-    parse_model_action,
+    extract_raw_action_line,
 )
 
 SUPPORTED_ACTIONS = ("INSPECT", "QUARANTINE", "LIFT", "RECALL", "TRACE", "ALERT", "WAIT")
@@ -87,6 +87,8 @@ SYSTEM_PROMPT = (
 )
 
 
+SYSTEM_PROMPT = INFERENCE_SYSTEM_PROMPT
+
 def build_step_prompt(step: int, obs: FoodCrisisObservation, history: list[str]) -> str:
     """Build the user-turn prompt for one environment step. Matches inference.py format."""
     return build_user_prompt(step, obs, history)
@@ -103,11 +105,8 @@ def parse_and_guard_action(
     observation: FoodCrisisObservation,
     history: list[str],
 ) -> str:
-    """Apply the same parsing and safety guards used by inference.py."""
-    parsed = parse_model_action(completion_text, observation)
-    if parsed is None:
-        return "WAIT"
-    return apply_action_guard(parsed, observation, history)
+    """Pure-training path: use the first non-empty output line exactly as pure inference does."""
+    return extract_raw_action_line(completion_text)
 
 
 # ── data structures ───────────────────────────────────────────────────────────
@@ -196,7 +195,7 @@ def run_episode_with_llm(
         episode.steps.append(
             StepData(
                 prompt_text=prompt_text,
-                completion_text=completion_text,
+                completion_text=action,
                 action=action,
             )
         )

@@ -93,11 +93,11 @@ The most striking difference between models is *what they choose to do*. The bas
 
 **Baseline** — passive, reactive, wrong quarantines:
 
-![Baseline Action Distribution](baseline_action_dist.png)
+![Baseline Action Distribution](images/baseline_action_dist.png)
 
 **Trained** — actively traces, conserves quarantine for confirmed sources:
 
-![Trained Action Distribution](trained_action_dist.png)
+![Trained Action Distribution](images/trained_action_dist.png)
 
 The trained model issues 4× more TRACE actions and almost no spurious quarantines. It's learned that information-gathering before acting is structurally rewarded.
 
@@ -105,11 +105,11 @@ The trained model issues 4× more TRACE actions and almost no spurious quarantin
 
 **Baseline:**
 
-![Baseline Average Reward](baseline_avg_reward.png)
+![Baseline Average Reward](images/baseline_avg_reward.png)
 
 **Trained:**
 
-![Trained Average Reward](trained_avg_reward.png)
+![Trained Average Reward](images/trained_avg_reward.png)
 
 The baseline averages below −2.8 on easy and crashes to −5.1 on hard. The trained model's easy-task reward, while still negative in aggregate (because urgency penalties accumulate until source is found), recovers quickly and terminates early. The medium task is the biggest gap — the trained model learned to handle multi-source outbreaks with tighter budgets, which the baseline never manages.
 
@@ -117,11 +117,11 @@ The baseline averages below −2.8 on easy and crashes to −5.1 on hard. The tr
 
 **Baseline:**
 
-![Baseline Episode Length](baseline_episode_len.png)
+![Baseline Episode Length](images/baseline_episode_len.png)
 
 **Trained:**
 
-![Trained Episode Length](trained_episode_len.png)
+![Trained Episode Length](images/trained_episode_len.png)
 
 The episode length chart tells the clearest story. The trained model terminates the easy task in ~9 steps. The baseline runs almost the full 48, still uncertain. On hard, both models run the distance — but what they're doing inside those 72 steps is completely different.
 
@@ -129,11 +129,11 @@ The episode length chart tells the clearest story. The trained model terminates 
 
 **Baseline:**
 
-![Baseline Reward Distribution](baseline_reward_dist.png)
+![Baseline Reward Distribution](images/baseline_reward_dist.png)
 
 **Trained:**
 
-![Trained Reward Distribution](trained_reward_dist.png)
+![Trained Reward Distribution](images/trained_reward_dist.png)
 
 The baseline's distribution is spread across deep negatives (−10 to −15 range) with almost nothing above zero. The trained model's distribution spikes at 0 (WAIT and TRACE neutrals) with a visible cluster of positive rewards from source quarantines and correct recalls. The shape alone tells you that the trained model has learned what *not* to penalize itself on.
 
@@ -141,15 +141,15 @@ The baseline's distribution is spread across deep negatives (−10 to −15 rang
 
 **Baseline — easy, medium, hard:**
 
-![Baseline Easy](baseline_curve_easy.png)
-![Baseline Medium](baseline_curve_medium.png)
-![Baseline Hard](baseline_curve_hard.png)
+![Baseline Easy](images/baseline_curve_easy.png)
+![Baseline Medium](images/baseline_curve_medium.png)
+![Baseline Hard](images/baseline_curve_hard.png)
 
 **Trained — easy, medium, hard:**
 
-![Trained Easy](trained_curve_easy.png)
-![Trained Medium](trained_curve_medium.png)
-![Trained Hard](trained_curve_hard.png)
+![Trained Easy](images/trained_curve_easy.png)
+![Trained Medium](images/trained_curve_medium.png)
+![Trained Hard](images/trained_curve_hard.png)
 
 The trained model's easy curve shows initial penalties from urgency accumulation, then a sharp recovery to +5.5 at episode end — the source quarantine reward hitting. The medium curve shows the most dramatic moment: a −12 crash at step 2 (wrong early action), then a +5 spike at step 11 when the agent corrects and locks onto the source. The baseline never produces that recovery arc. On hard, the trained model oscillates but stays bounded. The baseline drifts deeper negative with no terminal positive signal.
 

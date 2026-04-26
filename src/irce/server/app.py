@@ -206,7 +206,8 @@ async def session_reset(req: dict = None):
     
     task_id = req.get("task_id", 1)
     seed = req.get("seed", 7)
-    obs = env.reset(task_id=task_id, seed=seed)
+    deception_level = float(req.get("deception_level", 0.0))
+    obs = env.reset(task_id=task_id, seed=seed, deception_level=deception_level)
     
     ser_obs = obs.model_dump() if hasattr(obs, "model_dump") else obs.dict()
     return {

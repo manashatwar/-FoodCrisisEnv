@@ -34,6 +34,19 @@
             <div id="task-desc" style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:10px;">
               Single source, low noise, fast reports, generous budgets.
             </div>
+            <!-- Deception Level Dial -->
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px;text-transform:uppercase;">🎭 Deception Level</span>
+                <span id="deception-val" style="font-size:13px;font-weight:800;font-family:var(--mono);color:var(--amber);">0.0</span>
+              </div>
+              <input type="range" id="deception-slider" min="0" max="10" value="0" step="1"
+                oninput="updateDeceptionLabel(this.value)"
+                style="width:100%;accent-color:var(--amber);cursor:pointer;"/>
+              <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text3);margin-top:2px;">
+                <span>No Deception</span><span>Max Adversarial</span>
+              </div>
+            </div>
             <button class="btn btn-primary btn-sm" style="width:100%;" onclick="resetEnv()">⟳ Reset Episode</button>
           </div>
         </div>
@@ -191,6 +204,35 @@
         <div class="sim-card">
           <div class="sim-card-title">Quarantined Nodes</div>
           <div class="sim-card-body"><div class="pill-list" id="quarantine-pills"><span style="color:var(--text3);font-size:11px;">None.</span></div></div>
+        </div>
+
+        <!-- Deception Metrics -->
+        <div class="sim-card">
+          <div class="sim-card-title">🎭 Deception Metrics</div>
+          <div class="sim-card-body">
+            <div style="font-size:9px;color:var(--text3);margin-bottom:8px;letter-spacing:.5px;">Live adversarial resistance scores</div>
+            <div class="metric-row" style="margin-bottom:4px;">
+              <span class="metric-label">🛡 Deception Resistance</span>
+              <span class="metric-val good" id="dm-resistance">—</span>
+            </div>
+            <div class="bar-bg" style="margin-bottom:8px;"><div class="bar-fill" id="dm-resistance-bar" style="width:0%;background:var(--accent);"></div></div>
+            <div class="metric-row" style="margin-bottom:4px;">
+              <span class="metric-label">🏃 Symptom Chasing</span>
+              <span class="metric-val" id="dm-symptom">—</span>
+            </div>
+            <div class="bar-bg" style="margin-bottom:8px;"><div class="bar-fill" id="dm-symptom-bar" style="width:0%;background:var(--amber);"></div></div>
+            <div class="metric-row" style="margin-bottom:4px;">
+              <span class="metric-label">💰 Budget Efficiency</span>
+              <span class="metric-val" id="dm-efficiency">—</span>
+            </div>
+            <div class="bar-bg" style="margin-bottom:2px;"><div class="bar-fill" id="dm-efficiency-bar" style="width:0%;background:var(--blue,#38bdf8);"></div></div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
+              <div class="metric-row">
+                <span style="font-size:9px;color:var(--text3);font-weight:600;letter-spacing:.5px;">TRAP NODES ACTIVE</span>
+                <span id="dm-traps" style="font-size:12px;font-weight:800;font-family:var(--mono);color:var(--amber);">0</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Illness -->

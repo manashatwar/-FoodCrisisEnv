@@ -24,9 +24,9 @@
   <section class="hero">
     <div class="hero-bg"><div class="hero-grid"></div></div>
     <div class="hero-content">
-      <div class="hero-badge">🔬 OpenEnv Benchmark · Food Safety</div>
-      <h1>Trace. Contain.<br><span class="highlight">Save Lives.</span></h1>
-      <p class="hero-desc">An AI benchmark where agents act as food safety investigators — tracing contaminated food through a live supply chain under noisy sensors, delayed reports, and limited budgets.</p>
+      <div class="hero-badge">🔬 OpenEnv Benchmark · DeceptEnv</div>
+      <h1>Trace. Contain.<br><span class="highlight">Resist Deception.</span></h1>
+      <p class="hero-desc">An AI benchmark where agents act as food safety investigators — tracing contaminated food under noisy sensors, adversarial false signals, delayed reports, and a continuous <strong>deception_level</strong> dial from 0.0 to 1.0.</p>
       <div class="hero-actions">
         <button class="btn btn-primary" onclick="navigateTo('simulate')">🚀 Launch Simulation</button>
         <a class="btn btn-outline" href="/docs" target="_blank">📡 API Documentation</a>
@@ -75,9 +75,14 @@
         <p>Every observation includes a natural language summary. Drop in any LLM as an agent with our prompt template.</p>
       </div>
       <div class="feat-card glass">
+        <div class="feat-icon" style="background:rgba(168,85,247,.12)">🎭</div>
+        <h3>DeceptEnv Curriculum</h3>
+        <p>A continuous <code>deception_level</code> (0.0–1.0) independently scales adversarial intensity — false signals, sensor noise, illness delay — without changing graph complexity.</p>
+      </div>
+      <div class="feat-card glass">
         <div class="feat-icon" style="background:rgba(34,197,94,.12)">📊</div>
-        <h3>Deterministic Grading</h3>
-        <p>Episodes scored on containment, precision, speed, and trust preservation. Reproducible with seed control.</p>
+        <h3>3 Deception Metrics</h3>
+        <p>Every step exposes <strong>deception_resistance</strong>, <strong>symptom_chasing_rate</strong>, and <strong>budget_efficiency</strong> — reproducible, objective benchmarks for LLM adversarial robustness.</p>
       </div>
     </div>
   </section>
@@ -131,7 +136,8 @@
           <span class="tag tag-green">Easy</span><span style="color:var(--text3);font-size:12px;">Task 1</span>
         </div>
         <div style="font-size:12px;color:var(--text2);line-height:1.7;">
-          Single source · Low noise (0.05) · 1-step illness delay · 10 lab tests · 100 recall budget · 48 steps
+          Single source · Low noise (0.05) · 1-step illness delay · 10 lab tests · 48 steps<br>
+          <span style="color:var(--text3);">Deception: 0 trap nodes at dec=0.0</span>
         </div>
       </div>
       <div class="glass" style="padding:28px;">
@@ -139,7 +145,8 @@
           <span class="tag tag-amber">Medium</span><span style="color:var(--text3);font-size:12px;">Task 2</span>
         </div>
         <div style="font-size:12px;color:var(--text2);line-height:1.7;">
-          Multi-source · Noisy sensors (0.15) · 3-step delay · 6 lab tests · 60 recall budget · 60 steps
+          Multi-source · Noisy sensors (0.15) · 3-step delay · 6 lab tests · 60 steps<br>
+          <span style="color:var(--amber);">Deception: up to 3 false-signal traps at dec=1.0</span>
         </div>
       </div>
       <div class="glass" style="padding:28px;">
@@ -147,7 +154,8 @@
           <span class="tag tag-red">Hard</span><span style="color:var(--text3);font-size:12px;">Task 3</span>
         </div>
         <div style="font-size:12px;color:var(--text2);line-height:1.7;">
-          Adversarial spikes · Re-seeding · 5-step delay · 4 lab tests · 40 recall budget · 72 steps
+          Re-seeding · High noise · 5-step delay · 4 lab tests · 72 steps<br>
+          <span style="color:var(--red);">Deception: up to 5 trap nodes + source randomization at dec=1.0</span>
         </div>
       </div>
     </div>

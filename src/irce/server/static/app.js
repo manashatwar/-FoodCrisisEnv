@@ -6,6 +6,7 @@ let currentTask = 1, lastState = null, episodeLog = [];
 let llmMode = 'manual', autoPlayLLM = false;
 let currentSessionId = "default"; 
 let totalReward = 0; // Running total for the session
+let currentDeception = 0.0; // 0.0 – 1.0 deception level
 const labBudgetMax = {1:10,2:6,3:4};
 const recallBudgetMax = {1:100,2:60,3:40};
 const maxSteps = {1:48,2:60,3:72};
@@ -42,7 +43,7 @@ async function initSimulation() {
   try {
     const r = await fetch('/reset', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({task_id:1,seed:7})
+      body:JSON.stringify({task_id:1, seed:7, deception_level: currentDeception})
     });
     const data = await r.json();
     updateUI(data.observation || data, null, null);
@@ -92,6 +93,16 @@ function selectTask(t) {
   document.getElementById('step-max').textContent = maxSteps[t];
 }
 
+function updateDeceptionLabel(val) {
+  currentDeception = Math.round(val) / 10;
+  const el = document.getElementById('deception-val');
+  el.textContent = currentDeception.toFixed(1);
+  // Color gradient: green→yellow→red
+  if (currentDeception === 0) el.style.color = 'var(--clean)';
+  else if (currentDeception < 0.5) el.style.color = 'var(--amber)';
+  else el.style.color = 'var(--red)';
+}
+
 // ── API calls ──
 async function resetEnv() {
   episodeLog = []; updateLog();
@@ -99,7 +110,7 @@ async function resetEnv() {
   try {
     const r = await fetch('/reset', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({task_id:currentTask, seed:7})
+      body:JSON.stringify({task_id:currentTask, seed:7, deception_level: currentDeception})
     });
     const data = await r.json();
     if (data.session_id) currentSessionId = data.session_id; 
@@ -179,7 +190,13 @@ function buildPrompt(obs) {
   const summary = obs.natural_language_summary || '';
   const nodes = (obs.nodes||[]).map(n=>`${n.node_id} (${n.node_type})`).join(', ');
   const qNodes = Object.entries(obs.quarantine_status||{}).filter(([,v])=>v).map(([k])=>k);
-  return `You are a food safety incident responder.\n\n${summary}\n\nState:\n- Step: ${obs.timestep||obs.step_count||0}\n- Nodes: ${nodes}\n- Quarantined: ${qNodes.join(', ')||'None'}\n- Lab budget: ${obs.lab_budget||0}\n- Recall budget: ${obs.recall_budget||0}\n- Trust: ${(obs.public_trust||1).toFixed(2)}\n\nActions: INSPECT <node>, QUARANTINE <node>, LIFT <node>, RECALL <batch>, TRACE <batch>, WAIT\n\nRespond with exactly ONE action string.`;
+  const dm = obs.deception_metrics || {};
+  const dl = (obs.deception_level ?? 0).toFixed(1);
+  const traps = obs.adversarial_trap_count ?? 0;
+  const deceptionCtx = traps > 0
+    ? `\n- DECEPTION LEVEL: ${dl} — ${traps} trap node(s) with false sensor spikes active. Verify before quarantining.`
+    : '';
+  return `You are a food safety incident responder.\n\n${summary}\n\nState:\n- Step: ${obs.timestep||obs.step_count||0}\n- Nodes: ${nodes}\n- Quarantined: ${qNodes.join(', ')||'None'}\n- Lab budget: ${obs.lab_budget||0}\n- Recall budget: ${obs.recall_budget||0}\n- Trust: ${(obs.public_trust||1).toFixed(2)}${deceptionCtx}\n\nActions: INSPECT <node>, QUARANTINE <node>, LIFT <node>, RECALL <batch>, TRACE <batch>, WAIT\n\nRespond with exactly ONE action string.`;
 }
 
 async function queryLLM(prompt) {
@@ -323,6 +340,33 @@ function updateUI(obs, reward, action) {
   }
 
   drawGraph(obs);
+
+  // ── Deception Metrics ──
+  const dm = obs.deception_metrics || {};
+  const traps = obs.adversarial_trap_count ?? 0;
+  document.getElementById('dm-traps').textContent = traps;
+  document.getElementById('dm-traps').style.color = traps > 0 ? 'var(--amber)' : 'var(--text3)';
+
+  if (dm.deception_resistance !== undefined) {
+    const dr = dm.deception_resistance;
+    document.getElementById('dm-resistance').textContent = (dr * 100).toFixed(0) + '%';
+    document.getElementById('dm-resistance').className = 'metric-val ' + (dr >= 0.7 ? 'good' : dr >= 0.4 ? 'warn' : 'bad');
+    document.getElementById('dm-resistance-bar').style.width = Math.round(dr * 100) + '%';
+    document.getElementById('dm-resistance-bar').style.background = dr >= 0.7 ? 'var(--accent)' : dr >= 0.4 ? 'var(--amber)' : 'var(--red)';
+  }
+  if (dm.symptom_chasing_rate !== undefined) {
+    const sc = dm.symptom_chasing_rate;
+    document.getElementById('dm-symptom').textContent = (sc * 100).toFixed(0) + '%';
+    document.getElementById('dm-symptom').className = 'metric-val ' + (sc >= 0.7 ? 'bad' : sc >= 0.4 ? 'warn' : 'good');
+    document.getElementById('dm-symptom-bar').style.width = Math.round(sc * 100) + '%';
+    document.getElementById('dm-symptom-bar').style.background = sc >= 0.7 ? 'var(--red)' : sc >= 0.4 ? 'var(--amber)' : 'var(--accent)';
+  }
+  if (dm.budget_efficiency !== undefined) {
+    const be = dm.budget_efficiency;
+    document.getElementById('dm-efficiency').textContent = (be * 100).toFixed(0) + '%';
+    document.getElementById('dm-efficiency').className = 'metric-val ' + (be >= 0.6 ? 'good' : be >= 0.3 ? 'warn' : 'bad');
+    document.getElementById('dm-efficiency-bar').style.width = Math.round(be * 100) + '%';
+  }
 }
 
 // ── Graph ──
